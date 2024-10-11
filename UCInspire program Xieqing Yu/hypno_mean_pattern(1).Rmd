@@ -1,0 +1,1259 @@
+---
+title: "Hypnogram Mean Pattern"
+author: "Haoqun Cao Xieqing Yu"
+date: "`r Sys.Date()`"
+output: rmdformats::readthedown
+  
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(knitr)
+library(rmdformats)
+library(kableExtra)
+library(dplyr)
+library(tseries)
+library(lubridate)
+library(ggplot2)
+library(discSurv)
+library(splines)
+library(flexsurv)
+library(survival)
+library(readr)
+## Global options
+options(max.print="60")
+opts_knit$set(width=75)
+```
+
+
+
+
+## read data
+```{r}
+dta.02 <- read_csv("/Users/xieqingyu/Desktop/5-min sleep new/unitef02 hypno.csv")
+dta.02 <- dta.02 %>% 
+  mutate(date = date(time))
+
+dta.03 <- read.csv("/Users/xieqingyu/Desktop/5-min sleep new/unitef03 hypno.csv") 
+dta.03 <- dta.03 %>% 
+  mutate(date = date(time))
+
+dta.04 <- read.csv("/Users/xieqingyu/Desktop/5-min sleep new/unitef04 hypno.csv") 
+dta.04 <- dta.04 %>% 
+  mutate(date = date(time))
+
+dta.05 <- read.csv("/Users/xieqingyu/Desktop/5-min sleep new/unitef05 hypno.csv") 
+dta.05 <- dta.05 %>% 
+  mutate(date = date(time))
+
+dta.06 <- read.csv("/Users/xieqingyu/Desktop/5-min sleep new/unitef06 hypno.csv") 
+dta.06 <- dta.06 %>% 
+  mutate(date = date(time))
+
+dta.07 <- read.csv("/Users/xieqingyu/Desktop/5-min sleep new/unitef07 hypno.csv") 
+dta.07 <- dta.07 %>% 
+  mutate(date = date(time))
+
+dta.08 <- read.csv("/Users/xieqingyu/Desktop/5-min sleep new/unitef08 hypno.csv") 
+dta.08 <- dta.08 %>% 
+  mutate(date = date(time))
+
+dta.11 <- read.csv("/Users/xieqingyu/Desktop/5-min sleep new/unitef11 hypno.csv") 
+dta.11 <- dta.11 %>% 
+  mutate(date = date(time))
+
+dta.12 <- read.csv("/Users/xieqingyu/Desktop/5-min sleep new/unitef012 hypno.csv") 
+dta.12 <- dta.12 %>% 
+  mutate(date = date(time))
+
+dta.13 <- read.csv("/Users/xieqingyu/Desktop/5-min sleep new/unitef13 hypno.csv") 
+dta.13 <- dta.13 %>% 
+  mutate(date = date(time))
+
+dta.14 <- read.csv("/Users/xieqingyu/Desktop/5-min sleep new/unitef14 hypno.csv") 
+dta.14 <- dta.14 %>% 
+  mutate(date = date(time))
+
+dta.15 <- read.csv("/Users/xieqingyu/Desktop/5-min sleep new/unitef15 hypno.csv") 
+dta.15 <- dta.15 %>% 
+  mutate(date = date(time))
+
+dta.16 <- read.csv("/Users/xieqingyu/Desktop/5-min sleep new/unitef16 hypno.csv") 
+dta.16 <- dta.16 %>% 
+  mutate(date = date(time))
+
+dta.18 <- read.csv("/Users/xieqingyu/Desktop/5-min sleep new/unitef18 hypno.csv") 
+dta.18 <- dta.18 %>% 
+  mutate(date = date(time))
+
+dta.19 <- read.csv("/Users/xieqingyu/Desktop/5-min sleep new/unitef19 hypno.csv") 
+dta.19 <- dta.19 %>% 
+  mutate(date = date(time))
+
+dta.20 <- read.csv("/Users/xieqingyu/Desktop/5-min sleep new/unitef20 hypno.csv") 
+dta.20 <- dta.20 %>% 
+  mutate(date = date(time))
+
+dta.21 <- read.csv("/Users/xieqingyu/Desktop/5-min sleep new/unitef21 hypno.csv") 
+dta.21 <- dta.21 %>% 
+  mutate(date = date(time)) %>% 
+  filter(date != "2022-09-08")
+
+colnames(dta.02)[1] <- "X"
+colnames(dta.02)[4] <- "datetime..date"
+dta <- rbind(dta.02, dta.03, dta.04, dta.05, dta.06, dta.07, dta.08, dta.11, dta.12, 
+                 dta.13, dta.14, dta.15, dta.16, dta.18, dta.19, dta.20, dta.21)
+```
+
+
+```{r}
+# dta <- read.csv("D:/Schoolf_File/SR/5-min sleep new/unitef21 hypno.csv")
+# dta[length(dta),]$value = 5
+# dta <- dta %>% bind_rows(read.csv("D:/Schoolf_File/SR/5-min sleep new/unitef21 hypno.csv"))
+
+```
+
+```{r}
+# dta <- dta %>% 
+#   mutate(date = date(time)) %>% 
+#   filter(date != "2022-09-08")
+```
+
+
+## add termination state
+```{r}
+dta$tn <- 0
+j <- 0
+for(i in 1:(nrow(dta)-1)){
+  if(dta[i,]$date != dta[i+1,]$date | dta[i,]$name!=dta[i,]$name){
+    dta[i,]$value = 5
+    j <- 0
+  }
+  dta[i,]$tn <- j
+  j <- j + 1
+}
+dta[length(dta),]$value = 5
+```
+
+## delete the outliers(the observations whose sleep time is too long)
+```{r}
+dta<-dta %>% 
+  group_by(date,name) %>% 
+  mutate(max_T = max(tn)) 
+
+# dta %>% 
+#   group_by(name)
+
+dta %>%
+  filter(max_T > 150) %>% 
+  count()
+
+dta <- dta %>%
+  filter(max_T <= 150)
+
+
+```
+
+
+## mean pattern without covariate
+
+```{r}
+# define hyperparameters
+# knots <- c(50)
+knots <- NULL
+boundary_knots <- range(0,dta$max_T)
+
+
+time_onset <- dta$tn
+markov_chain <- dta$value
+model_list <- list()
+
+
+#fit model
+for(head in 1:4){
+  model_sub_list <- list()
+  for(tail in 1:5){
+    if(tail == head){
+      next
+    }
+    else{
+      current_state <- markov_chain[1]
+      current_state_duration <- 1
+      result <- list()
+      t_n <- time_onset[1]
+      for (i in 2:length(markov_chain)) {
+        if (markov_chain[i] == current_state) {
+          current_state_duration <- current_state_duration + 1
+        } else {
+          if(current_state == head & markov_chain[i] == tail){
+            result <- append(result, list(c(current_state, current_state_duration,1,t_n)))
+          }
+          else if(current_state == head){
+            result <- append(result, list(c(current_state, current_state_duration,0,t_n)))
+          }
+          t_n <- time_onset[i]
+          current_state <- markov_chain[i]
+          current_state_duration <- 1
+        }
+      }
+      
+      result_matrix <- matrix(unlist(result), ncol = 4, byrow = TRUE)
+      duration = result_matrix[,2]
+      event <- result_matrix[,3]
+      dta_sojourn <- as.data.frame(result_matrix[,2:4])
+      colnames(dta_sojourn) <- c('duration','event','current_time')
+      b_spline <- bs(x = dta_sojourn$current_time, knots = knots, Boundary.knots = boundary_knots,degree = 3)
+      dta_sojourn$z <-  b_spline
+      dta_discrete <- dataLong(dta_sojourn, timeColumn = "duration", eventColumn = "event",timeAsFactor = T)
+      model <- glm(y~timeInt+z, family = binomial(link = "logit"), data = dta_discrete)
+      model_sub_list <- c(model_sub_list, list(model))
+      spline_beta <- model$coefficients[c('z1',"z2","z3")]
+      y <- b_spline %*% spline_beta
+      plot(dta_sojourn$current_time, exp(y),xlab = "time onset sleep", ylab = "non-homogeneous intensity", main = paste("Estimated curve of beta with transition",head,'to',tail))
+    }
+  }
+  model_list <- c(model_list, list(model_sub_list))
+}
+
+
+jhat <- 4
+That <- 0
+pred_duration_sum <- c(0,0,0,0)
+pred_j <- NULL
+pred_tau <- NULL
+pred_T <- NULL
+while(jhat != 5){
+  pred_T <- c(pred_T, That)
+  pred_j <- c(pred_j, jhat)
+  xlevels <- length(model_list[[jhat]][[1]]$xlevels[[1]])
+  timeInt <- as.factor(seq(1:xlevels))
+  len <- length(timeInt)
+  new_z <- rep(bs(x = c(That), knots = knots, Boundary.knots = boundary_knots,degree = 3), length(timeInt))
+  # new_time <- c(That)
+  z <- matrix(new_z,nrow = length(timeInt), byrow = T)
+  # current_time <- matrix(new_time, nrow = length(timeInt), byrow = T)
+  newdata <- data.frame(timeInt, z)
+  # newdata <- data.frame(timeInt, current_time)
+  hazards <- NULL
+  for (i in 1:4){
+    hazard <- predict(model_list[[jhat]][[i]], newdata = newdata, type = 'response')
+     hazards <- c( hazards, hazard)
+  }
+  cause_hazard_m <- matrix(hazards, ncol = 4, byrow = F)
+  hazard <- rowSums(cause_hazard_m)
+  survf <- c(1)
+  value <- 1
+  for (i in 2:length(hazard)){
+    value <- value * (1 - hazard[i-1])
+    survf <- c(survf, value)
+  }
+  # dist_vector <- NULL
+  # surv_vector <- NULL
+  # for(t in 1:len){
+  #   value <- 1
+  #   for(tm in 1:t){
+  #     value <- value * (1 - rowSums(probs)[tm])
+  #   }
+  #   surv_vector <- c(surv_vector, value)
+  # }
+  f_m <- cause_hazard_m * survf
+  
+  cond_f_m <- t(t(f_m) / colSums(f_m))
+  # for(i in 1:4){
+  #   for(t in 1:len){
+  #     value <- surv_vector[t]
+  #     for(tm in 1:t){
+  #       value <- value * probs[t,i]
+  #     }
+  #     dist_vector <- c(dist_vector, value)
+  #   }
+  # }
+  # dist_vector <- matrix(dist_vector, ncol = 4, byrow = F)
+  next_state <- which.max(colSums(f_m))
+  
+  pred_duration <- 0
+  for(i in 1:len){
+    # print(i)
+    pred_duration <- pred_duration + i * cond_f_m[i, next_state]
+  }
+  pred_duration_sum[jhat] <- pred_duration_sum[jhat] + pred_duration
+  jhat <- seq(1:5)[-jhat][next_state]
+  print("next state is")
+  print(jhat)
+  print("state duration is")
+  tauhat <- pred_duration
+  pred_tau <- c(pred_tau, tauhat)
+  print(tauhat)
+  That <- tauhat + That
+
+}
+pred_T <- c(pred_T, That)
+pred_j <- c(pred_j, jhat)
+
+# plot(1:length(pred_tau), pred_j,type = "l", xlab = "time onset sleep", ylab = "sleep stage",main = "mean pattern")
+# plot(pred_T, pred_j,xlab = "time onset sleep(epoch)", ylab = "sleep stage",main = "mean pattern")
+
+int_pred_tau <- c(round(pred_tau),1)
+
+pred_traj <- rep(pred_j, int_pred_tau)
+
+plot(1:length(pred_traj), pred_traj,xlab = "time onset sleep(epoch)", ylab = "sleep stage",main = "mean pattern")
+```
+
+
+```{r}
+# library(kableExtra)
+pred_duration_sum <- c(pred_duration_sum, That[length(That)]) * 5 / 60
+names(pred_duration_sum) <- c("Deep","Light","REM","Awake", "Total Sleep Length")
+dta.out <- data.frame(pred_duration_sum)
+kable(dta.out, format = "html", caption = "") %>%
+  kable_styling(full_width = FALSE) 
+
+# print(pred_duration_sum * 5 /60)
+# print(That[length(That)] * 5 / 60)
+```
+
+
+## add covariate
+```{r}
+library(readxl)
+demographic <- read_excel("D:/Schoolf_File/SR/5-min sleep new/Demographics.xlsx")
+demographic$subject_id<- sprintf("%02d", demographic$subject_id)
+dta[dta$name == "unitef012",]$name = "unitef12"
+
+prefix <- "unitef"
+demographic$subject_id <- paste(prefix, demographic$subject_id, sep = "") 
+colnames(demographic)[1] <- "name"
+
+dta <- dta %>% 
+  left_join(demographic, by = "name")
+```
+
+
+
+
+
+
+## mean pattern with covariate
+```{r}
+pred_age <- mean(demographic$age)
+# pred_bmi <- mean(demographic$Prepreg_BMI)
+pred_first <- 0
+pred_Depression <- mean(demographic$Depression)
+
+# define hyperparameters
+# knots <- c(50)
+knots <- NULL
+boundary_knots <- range(0,dta$max_T)
+
+
+time_onset <- dta$tn
+markov_chain <- dta$value
+model_list <- list()
+covariate <- dta[,c(10,12,21)]
+
+#fit model
+for(head in 1:4){
+  model_sub_list <- list()
+  for(tail in 1:5){
+    if(tail == head){
+      next
+    }
+    else{
+      current_state <- markov_chain[1]
+      current_state_duration <- 1
+      result <- list()
+      t_n <- time_onset[1]
+      for (i in 2:length(markov_chain)) {
+        if (markov_chain[i] == current_state) {
+          current_state_duration <- current_state_duration + 1
+        } else {
+          if(current_state == head & markov_chain[i] == tail){
+            result <- append(result, list(c(current_state, current_state_duration,1,t_n, covariate[i-1,])))
+          }
+          else if(current_state == head){
+            result <- append(result, list(c(current_state, current_state_duration,0,t_n, covariate[i-1,])))
+          }
+          t_n <- time_onset[i]
+          current_state <- markov_chain[i]
+          current_state_duration <- 1
+        }
+      }
+      
+      result_matrix <- matrix(unlist(result), ncol = 7, byrow = TRUE)
+      duration = result_matrix[,2]
+      event <- result_matrix[,3]
+      dta_sojourn <- as.data.frame(result_matrix[,2:7])
+      colnames(dta_sojourn) <- c('duration','event','current_time',"age","first","depression")
+      b_spline <- bs(x = dta_sojourn$current_time, knots = knots, Boundary.knots = boundary_knots,degree = 3)
+      dta_sojourn$z <-  b_spline
+      dta_discrete <- dataLong(dta_sojourn, timeColumn = "duration", eventColumn = "event",timeAsFactor = T)
+      model <- glm(y~timeInt+z+age+as.factor(first)+depression, family = binomial(link = "logit"), data = dta_discrete)
+      model_sub_list <- c(model_sub_list, list(model))
+      spline_beta <- model$coefficients[c('z1',"z2","z3")]
+      y <- b_spline %*% spline_beta
+      plot(dta_sojourn$current_time, exp(y),xlab = "time onset sleep", ylab = "non-homogeneous intensity", main = paste("Estimated curve of beta with transition",head,'to',tail))
+    }
+  }
+  model_list <- c(model_list, list(model_sub_list))
+}
+
+jhat <- 4
+That <- 0
+pred_j <- NULL
+pred_tau <- NULL
+pred_T <- NULL
+pred_duration_sum <- c(0,0,0,0)
+while(jhat != 5){
+  pred_T <- c(pred_T, That)
+  pred_j <- c(pred_j, jhat)
+  xlevels <- length(model_list[[jhat]][[1]]$xlevels[[1]])
+  timeInt <- as.factor(seq(1:xlevels))
+  len <- length(timeInt)
+  new_z <- rep(bs(x = c(That), knots = knots, Boundary.knots = boundary_knots,degree = 3), length(timeInt))
+  new_age <- rep(pred_age, length(timeInt))
+  # new_BMI <- rep(pred_bmi, length(timeInt))
+  new_depression <- rep(pred_Depression, length(timeInt))
+  new_first <- rep(pred_first, length(timeInt))
+  age <- matrix(new_age, nrow = length(timeInt), byrow = T)
+  # BMI <- matrix(new_BMI, nrow = length(timeInt), byrow = T)
+  first <- matrix(new_first, nrow = length(timeInt), byrow = T)
+  depression <- matrix(new_depression, nrow = length(timeInt), byrow = T)
+  # new_time <- c(That)
+  z <- matrix(new_z,nrow = length(timeInt), byrow = T)
+  # current_time <- matrix(new_time, nrow = length(timeInt), byrow = T)
+  # newdata <- data.frame(timeInt, z, age, BMI, first)
+  newdata <- data.frame(timeInt, z, age, first, depression)
+  # newdata <- data.frame(timeInt, current_time)
+  hazards <- NULL
+  for (i in 1:4){
+    hazard <- predict(model_list[[jhat]][[i]], newdata = newdata, type = 'response')
+     hazards <- c( hazards, hazard)
+  }
+  cause_hazard_m <- matrix(hazards, ncol = 4, byrow = F)
+  hazard <- rowSums(cause_hazard_m)
+  survf <- c(1)
+  value <- 1
+  for (i in 2:length(hazard)){
+    value <- value * (1 - hazard[i-1])
+    survf <- c(survf, value)
+  }
+  # dist_vector <- NULL
+  # surv_vector <- NULL
+  # for(t in 1:len){
+  #   value <- 1
+  #   for(tm in 1:t){
+  #     value <- value * (1 - rowSums(probs)[tm])
+  #   }
+  #   surv_vector <- c(surv_vector, value)
+  # }
+  f_m <- cause_hazard_m * survf
+  
+  cond_f_m <- t(t(f_m) / colSums(f_m))
+  # for(i in 1:4){
+  #   for(t in 1:len){
+  #     value <- surv_vector[t]
+  #     for(tm in 1:t){
+  #       value <- value * probs[t,i]
+  #     }
+  #     dist_vector <- c(dist_vector, value)
+  #   }
+  # }
+  # dist_vector <- matrix(dist_vector, ncol = 4, byrow = F)
+  next_state <- which.max(colSums(f_m))
+  
+  pred_duration <- 0
+  for(i in 1:len){
+    # print(i)
+    pred_duration <- pred_duration + i * cond_f_m[i, next_state]
+  }
+  pred_duration_sum[jhat] <- pred_duration_sum[jhat] + pred_duration
+  jhat <- seq(1:5)[-jhat][next_state]
+  print("next state is")
+  print(jhat)
+  print("state duration is")
+  tauhat <- pred_duration
+  pred_tau <- c(pred_tau, tauhat)
+  print(tauhat)
+  That <- tauhat + That
+
+}
+pred_T <- c(pred_T, That)
+pred_j <- c(pred_j, jhat)
+
+# plot(1:length(pred_tau), pred_j,type = "l", xlab = "time onset sleep", ylab = "sleep stage",main = "mean pattern")
+
+int_pred_tau <- c(round(pred_tau),1)
+
+pred_traj <- rep(pred_j, int_pred_tau)
+
+plot(1:length(pred_traj), pred_traj,xlab = "time onset sleep(epoch)", ylab = "sleep stage",main = "mean pattern")
+```
+
+
+## summarize the total time of different sleeping stages in mean pattern（unit：hour）
+```{r}
+pred_duration_sum <- c(pred_duration_sum, That[length(That)]) * 5 / 60
+names(pred_duration_sum) <- c("Deep","Light","REM","Awake", "Total Sleep Length")
+dta.out <- data.frame(pred_duration_sum)
+kable(dta.out, format = "html", caption = "") %>%
+  kable_styling(full_width = FALSE) 
+```
+
+
+
+
+## Will age affect your sleep quality?
+```{r}
+# pred_bmi <- mean(demographic$Prepreg_BMI)
+pred_Depression <- mean(demographic$Depression)
+pred_first <- 0
+sleep_seq <- range(dta$age)[1]:range(dta$age)[2]
+total_sleep <- rep(0, length(sleep_seq))
+four_stage_proportion_m <- matrix(0, nrow = length(sleep_seq), ncol = 4)
+idx <- 0
+for(pred_age in sleep_seq){
+  idx <- idx + 1
+  jhat <- 4
+  That <- 0
+  pred_duration_sum <- c(0,0,0,0)
+  while(jhat != 5){
+    # pred_T <- c(pred_T, That)
+    # pred_j <- c(pred_j, jhat)
+    xlevels <- length(model_list[[jhat]][[1]]$xlevels[[1]])
+    timeInt <- as.factor(seq(1:xlevels))
+    len <- length(timeInt)
+    new_z <- rep(bs(x = c(That), knots = knots, Boundary.knots = boundary_knots,degree = 3), length(timeInt))
+    new_age <- rep(pred_age, length(timeInt))
+    # new_BMI <- rep(pred_bmi, length(timeInt))
+    new_depression <- rep(pred_Depression, length(timeInt))
+    new_first <- rep(pred_first, length(timeInt))
+    age <- matrix(new_age, nrow = length(timeInt), byrow = T)
+    # BMI <- matrix(new_BMI, nrow = length(timeInt), byrow = T)
+    depression <- matrix(new_depression, nrow = length(timeInt), byrow = T)
+    first <- matrix(new_first, nrow = length(timeInt), byrow = T)
+    z <- matrix(new_z,nrow = length(timeInt), byrow = T)
+    newdata <- data.frame(timeInt, z, age, first, depression)
+    hazards <- NULL
+    for (i in 1:4){
+      hazard <- predict(model_list[[jhat]][[i]], newdata = newdata, type = 'response')
+       hazards <- c( hazards, hazard)
+    }
+    cause_hazard_m <- matrix(hazards, ncol = 4, byrow = F)
+    hazard <- rowSums(cause_hazard_m)
+    survf <- c(1)
+    value <- 1
+    for (i in 2:length(hazard)){
+      value <- value * (1 - hazard[i-1])
+      survf <- c(survf, value)
+    }
+
+    f_m <- cause_hazard_m * survf
+    
+    cond_f_m <- t(t(f_m) / colSums(f_m))
+    next_state <- which.max(colSums(f_m))
+    
+    pred_duration <- 0
+    for(i in 1:len){
+      pred_duration <- pred_duration + i * cond_f_m[i, next_state]
+    }
+    pred_duration_sum[jhat] <- pred_duration_sum[jhat] + pred_duration
+    jhat <- seq(1:5)[-jhat][next_state]
+    # print("next state is")
+    # print(jhat)
+    # print("state duration is")
+    tauhat <- pred_duration
+    # pred_tau <- c(pred_tau, tauhat)
+    # print(tauhat)
+    That <- tauhat + That
+  
+  }
+  # pred_T <- c(pred_T, That)
+  # pred_j <- c(pred_j, jhat)
+  total_sleep[idx] <- sum(pred_duration_sum)
+  four_stage_proportion_m[idx,] <- pred_duration_sum / total_sleep[idx]
+  
+}
+
+plot(sleep_seq, total_sleep*5/60, xlab = "age",ylab = "predicted total sleep duration(hours)", main = "estimated relashionship between total sleep and age")
+
+plot(sleep_seq, four_stage_proportion_m[,1], xlab = "age",ylab = "predicted deep sleep proportion", main = "estimated relashionship between deep sleep proportion and age")
+
+plot(sleep_seq, four_stage_proportion_m[,2], xlab = "age",ylab = "predicted light sleep proportion", main = "estimated relashionship between light sleep proportion and age")
+
+plot(sleep_seq, four_stage_proportion_m[,3], xlab = "age",ylab = "predicted REM sleep proportion", main = "estimated relashionship between REM sleep proportion and age")
+
+plot(sleep_seq, four_stage_proportion_m[,4], xlab = "age",ylab = "predicted awake stage proportion", main = "estimated relashionship between awake sleep proportion and age")
+
+
+# plot(1:length(pred_tau), pred_j,type = "l", xlab = "time onset sleep", ylab = "sleep stage",main = "mean pattern")
+
+# int_pred_tau <- c(round(pred_tau),1)
+# 
+# pred_traj <- rep(pred_j, int_pred_tau)
+# 
+# plot(1:length(pred_traj), pred_traj,xlab = "time onset sleep(epoch)", ylab = "sleep stage",main = "mean pattern")
+# 
+# print(pred_duration_sum * 5 /60)
+# print(That[length(That)] * 5 / 60)
+
+```
+
+
+## Will your shape affects how you sleep?
+```{r}
+pred_age <- mean(demographic$age)
+pred_first <- 0
+BMI_seq <- range(dta$Prepreg_BMI)[1]:range(dta$Prepreg_BMI)[2]
+total_sleep <- rep(0, length(BMI_seq))
+four_stage_proportion_m <- matrix(0, nrow = length(BMI_seq), ncol = 4)
+idx <- 0
+for(pred_bmi in BMI_seq){
+  idx <- idx + 1
+  jhat <- 4
+  That <- 0
+  pred_duration_sum <- c(0,0,0,0)
+  while(jhat != 5){
+    # pred_T <- c(pred_T, That)
+    # pred_j <- c(pred_j, jhat)
+    xlevels <- length(model_list[[jhat]][[1]]$xlevels[[1]])
+    timeInt <- as.factor(seq(1:xlevels))
+    len <- length(timeInt)
+    new_z <- rep(bs(x = c(That), knots = knots, Boundary.knots = boundary_knots,degree = 3), length(timeInt))
+    new_age <- rep(pred_age, length(timeInt))
+    new_BMI <- rep(pred_bmi, length(timeInt))
+    new_first <- rep(pred_first, length(timeInt))
+    age <- matrix(new_age, nrow = length(timeInt), byrow = T)
+    BMI <- matrix(new_BMI, nrow = length(timeInt), byrow = T)
+    first <- matrix(new_first, nrow = length(timeInt), byrow = T)
+    z <- matrix(new_z,nrow = length(timeInt), byrow = T)
+    newdata <- data.frame(timeInt, z, age, BMI, first)
+    hazards <- NULL
+    for (i in 1:4){
+      hazard <- predict(model_list[[jhat]][[i]], newdata = newdata, type = 'response')
+       hazards <- c( hazards, hazard)
+    }
+    cause_hazard_m <- matrix(hazards, ncol = 4, byrow = F)
+    hazard <- rowSums(cause_hazard_m)
+    survf <- c(1)
+    value <- 1
+    for (i in 2:length(hazard)){
+      value <- value * (1 - hazard[i-1])
+      survf <- c(survf, value)
+    }
+
+    f_m <- cause_hazard_m * survf
+    
+    cond_f_m <- t(t(f_m) / colSums(f_m))
+    next_state <- which.max(colSums(f_m))
+    
+    pred_duration <- 0
+    for(i in 1:len){
+      pred_duration <- pred_duration + i * cond_f_m[i, next_state]
+    }
+    pred_duration_sum[jhat] <- pred_duration_sum[jhat] + pred_duration
+    jhat <- seq(1:5)[-jhat][next_state]
+    # print("next state is")
+    # print(jhat)
+    # print("state duration is")
+    tauhat <- pred_duration
+    # pred_tau <- c(pred_tau, tauhat)
+    # print(tauhat)
+    That <- tauhat + That
+  
+  }
+  # pred_T <- c(pred_T, That)
+  # pred_j <- c(pred_j, jhat)
+  total_sleep[idx] <- sum(pred_duration_sum)
+  four_stage_proportion_m[idx,] <- pred_duration_sum / total_sleep[idx]
+  
+}
+
+plot(BMI_seq, total_sleep*5/60, xlab = "BMI",ylab = "predicted total sleep duration(hours)", main = "estimated relashionship between total sleep and BMI")
+
+plot(BMI_seq, four_stage_proportion_m[,1], xlab = "BMI",ylab = "predicted deep sleep proportion", main = "estimated relashionship between deep sleep proportion and BMI")
+
+plot(BMI_seq, four_stage_proportion_m[,2], xlab = "BMI",ylab = "predicted light sleep proportion", main = "estimated relashionship between deep sleep proportion and BMI")
+
+plot(BMI_seq, four_stage_proportion_m[,3], xlab = "BMI",ylab = "predicted REM sleep proportion", main = "estimated relashionship between deep sleep proportion and BMI")
+
+plot(BMI_seq, four_stage_proportion_m[,4], xlab = "BMI",ylab = "predicted awake stage proportion", main = "estimated relashionship between deep sleep proportion and BMI")
+
+
+```
+
+## Will previous experience of preganancy make you sleep better?
+```{r}
+pred_age <- mean(demographic$age)
+pred_first <- 0
+BMI <- mean(demographic$Prepreg_BMI)
+# total_sleep <- rep(0, length(BMI_seq))
+four_stage_proportion_m <- matrix(0, nrow = 2, ncol = 5)
+idx <- 0
+for(pred_first in 0:1){
+  idx <- idx + 1
+  jhat <- 4
+  That <- 0
+  pred_duration_sum <- c(0,0,0,0)
+  while(jhat != 5){
+    # pred_T <- c(pred_T, That)
+    # pred_j <- c(pred_j, jhat)
+    xlevels <- length(model_list[[jhat]][[1]]$xlevels[[1]])
+    timeInt <- as.factor(seq(1:xlevels))
+    len <- length(timeInt)
+    new_z <- rep(bs(x = c(That), knots = knots, Boundary.knots = boundary_knots,degree = 3), length(timeInt))
+    new_age <- rep(pred_age, length(timeInt))
+    new_BMI <- rep(pred_bmi, length(timeInt))
+    new_first <- rep(pred_first, length(timeInt))
+    age <- matrix(new_age, nrow = length(timeInt), byrow = T)
+    BMI <- matrix(new_BMI, nrow = length(timeInt), byrow = T)
+    first <- matrix(new_first, nrow = length(timeInt), byrow = T)
+    z <- matrix(new_z,nrow = length(timeInt), byrow = T)
+    newdata <- data.frame(timeInt, z, age, BMI, first)
+    hazards <- NULL
+    for (i in 1:4){
+      hazard <- predict(model_list[[jhat]][[i]], newdata = newdata, type = 'response')
+       hazards <- c( hazards, hazard)
+    }
+    cause_hazard_m <- matrix(hazards, ncol = 4, byrow = F)
+    hazard <- rowSums(cause_hazard_m)
+    survf <- c(1)
+    value <- 1
+    for (i in 2:length(hazard)){
+      value <- value * (1 - hazard[i-1])
+      survf <- c(survf, value)
+    }
+
+    f_m <- cause_hazard_m * survf
+    
+    cond_f_m <- t(t(f_m) / colSums(f_m))
+    next_state <- which.max(colSums(f_m))
+    
+    pred_duration <- 0
+    for(i in 1:len){
+      pred_duration <- pred_duration + i * cond_f_m[i, next_state]
+    }
+    pred_duration_sum[jhat] <- pred_duration_sum[jhat] + pred_duration
+    jhat <- seq(1:5)[-jhat][next_state]
+    # print("next state is")
+    # print(jhat)
+    # print("state duration is")
+    tauhat <- pred_duration
+    # pred_tau <- c(pred_tau, tauhat)
+    # print(tauhat)
+    That <- tauhat + That
+  
+  }
+  # pred_T <- c(pred_T, That)
+  # pred_j <- c(pred_j, jhat)
+  
+  four_stage_proportion_m[idx,] <- c(pred_duration_sum / total_sleep[idx], sum(pred_duration_sum))
+  
+}
+colnames(four_stage_proportion_m) <- c("Deep Sleep Proportion", "Light Sleep Proportion", "REM Sleep Proportion", "Awake Sleep Proportion", "Total sleep length")
+rownames(four_stage_proportion_m) <- c("Not First Preganancy", "First Preganancy")
+
+dta.out <- data.frame(four_stage_proportion_m)
+kable(four_stage_proportion_m, format = "html", caption = "Sample Data") %>%
+  kable_styling(full_width = FALSE)
+```
+
+
+## Age
+```{r}
+# define hyperparameters
+# knots <- c(50)
+knots <- NULL
+boundary_knots <- range(0,dta$max_T)
+
+
+time_onset <- dta$tn
+markov_chain <- dta$value
+model_list <- list()
+covariate <- dta[,c(10,12,21)]
+
+#fit model
+for(head in 1:4){
+  model_sub_list <- list()
+  for(tail in 1:5){
+    if(tail == head){
+      next
+    }
+    else{
+      current_state <- markov_chain[1]
+      current_state_duration <- 1
+      result <- list()
+      t_n <- time_onset[1]
+      for (i in 2:length(markov_chain)) {
+        if (markov_chain[i] == current_state) {
+          current_state_duration <- current_state_duration + 1
+        } else {
+          if(current_state == head & markov_chain[i] == tail){
+            result <- append(result, list(c(current_state, current_state_duration,1,t_n, covariate[i-1,])))
+          }
+          else if(current_state == head){
+            result <- append(result, list(c(current_state, current_state_duration,0,t_n, covariate[i-1,])))
+          }
+          t_n <- time_onset[i]
+          current_state <- markov_chain[i]
+          current_state_duration <- 1
+        }
+      }
+      
+      result_matrix <- matrix(unlist(result), ncol = 7, byrow = TRUE)
+      duration = result_matrix[,2]
+      event <- result_matrix[,3]
+      dta_sojourn <- as.data.frame(result_matrix[,2:7])
+      colnames(dta_sojourn) <- c('duration','event','current_time',"age","first","depression")
+      b_spline <- bs(x = dta_sojourn$current_time, knots = knots, Boundary.knots = boundary_knots,degree = 3)
+      dta_sojourn$z <-  b_spline
+      dta_discrete <- dataLong(dta_sojourn, timeColumn = "duration", eventColumn = "event",timeAsFactor = T)
+      model <- glm(y~timeInt+z+age, family = binomial(link = "logit"), data = dta_discrete)
+      model_sub_list <- c(model_sub_list, list(model))
+    }
+  }
+  model_list <- c(model_list, list(model_sub_list))
+}
+
+
+sleep_seq <- range(dta$age)[1]:range(dta$age)[2]
+total_sleep <- rep(0, length(sleep_seq))
+four_stage_proportion_m <- matrix(0, nrow = length(sleep_seq), ncol = 4)
+idx <- 0
+for(pred_age in sleep_seq){
+  idx <- idx + 1
+  jhat <- 4
+  That <- 0
+  pred_duration_sum <- c(0,0,0,0)
+  while(jhat != 5){
+    # pred_T <- c(pred_T, That)
+    # pred_j <- c(pred_j, jhat)
+    xlevels <- length(model_list[[jhat]][[1]]$xlevels[[1]])
+    timeInt <- as.factor(seq(1:xlevels))
+    len <- length(timeInt)
+    new_z <- rep(bs(x = c(That), knots = knots, Boundary.knots = boundary_knots,degree = 3), length(timeInt))
+    new_age <- rep(pred_age, length(timeInt))
+    age <- matrix(new_age, nrow = length(timeInt), byrow = T)
+    z <- matrix(new_z,nrow = length(timeInt), byrow = T)
+    newdata <- data.frame(timeInt, z, age)
+    hazards <- NULL
+    for (i in 1:4){
+      hazard <- predict(model_list[[jhat]][[i]], newdata = newdata, type = 'response')
+       hazards <- c( hazards, hazard)
+    }
+    cause_hazard_m <- matrix(hazards, ncol = 4, byrow = F)
+    hazard <- rowSums(cause_hazard_m)
+    survf <- c(1)
+    value <- 1
+    for (i in 2:length(hazard)){
+      value <- value * (1 - hazard[i-1])
+      survf <- c(survf, value)
+    }
+
+    f_m <- cause_hazard_m * survf
+    
+    cond_f_m <- t(t(f_m) / colSums(f_m))
+    next_state <- which.max(colSums(f_m))
+    
+    pred_duration <- 0
+    for(i in 1:len){
+      pred_duration <- pred_duration + i * cond_f_m[i, next_state]
+    }
+    pred_duration_sum[jhat] <- pred_duration_sum[jhat] + pred_duration
+    jhat <- seq(1:5)[-jhat][next_state]
+    # print("next state is")
+    # print(jhat)
+    # print("state duration is")
+    tauhat <- pred_duration
+    # pred_tau <- c(pred_tau, tauhat)
+    # print(tauhat)
+    That <- tauhat + That
+  
+  }
+  # pred_T <- c(pred_T, That)
+  # pred_j <- c(pred_j, jhat)
+  total_sleep[idx] <- sum(pred_duration_sum)
+  four_stage_proportion_m[idx,] <- pred_duration_sum / total_sleep[idx]
+  
+}
+
+plot(sleep_seq, total_sleep*5/60, xlab = "age",ylab = "predicted total sleep duration(hours)", main = "estimated relashionship between total sleep and age")
+
+plot(sleep_seq, four_stage_proportion_m[,1], xlab = "age",ylab = "predicted deep sleep proportion", main = "estimated relashionship between deep sleep proportion and age")
+
+plot(sleep_seq, four_stage_proportion_m[,2], xlab = "age",ylab = "predicted light sleep proportion", main = "estimated relashionship between light sleep proportion and age")
+
+plot(sleep_seq, four_stage_proportion_m[,3], xlab = "age",ylab = "predicted REM sleep proportion", main = "estimated relashionship between REM sleep proportion and age")
+
+plot(sleep_seq, four_stage_proportion_m[,4], xlab = "age",ylab = "predicted awake stage proportion", main = "estimated relashionship between awake sleep proportion and age")
+```
+
+
+
+## BMI
+```{r}
+# define hyperparameters
+# knots <- c(50)
+knots <- NULL
+boundary_knots <- range(0,dta$max_T)
+
+
+time_onset <- dta$tn
+markov_chain <- dta$value
+model_list <- list()
+covariate <- dta[,c(10,11,12,21)]
+
+#fit model
+for(head in 1:4){
+  model_sub_list <- list()
+  for(tail in 1:5){
+    if(tail == head){
+      next
+    }
+    else{
+      current_state <- markov_chain[1]
+      current_state_duration <- 1
+      result <- list()
+      t_n <- time_onset[1]
+      for (i in 2:length(markov_chain)) {
+        if (markov_chain[i] == current_state) {
+          current_state_duration <- current_state_duration + 1
+        } else {
+          if(current_state == head & markov_chain[i] == tail){
+            result <- append(result, list(c(current_state, current_state_duration,1,t_n, covariate[i-1,])))
+          }
+          else if(current_state == head){
+            result <- append(result, list(c(current_state, current_state_duration,0,t_n, covariate[i-1,])))
+          }
+          t_n <- time_onset[i]
+          current_state <- markov_chain[i]
+          current_state_duration <- 1
+        }
+      }
+      
+      result_matrix <- matrix(unlist(result), ncol = 8, byrow = TRUE)
+      duration = result_matrix[,2]
+      event <- result_matrix[,3]
+      dta_sojourn <- as.data.frame(result_matrix[,2:8])
+      colnames(dta_sojourn) <- c('duration','event','current_time',"age","bmi","first","depression")
+      b_spline <- bs(x = dta_sojourn$current_time, knots = knots, Boundary.knots = boundary_knots,degree = 3)
+      dta_sojourn$z <-  b_spline
+      dta_discrete <- dataLong(dta_sojourn, timeColumn = "duration", eventColumn = "event",timeAsFactor = T)
+      model <- glm(y~timeInt+z+bmi, family = binomial(link = "logit"), data = dta_discrete)
+      model_sub_list <- c(model_sub_list, list(model))
+    }
+  }
+  model_list <- c(model_list, list(model_sub_list))
+}
+
+
+sleep_seq <- range(dta$Prepreg_BMI)[1]:range(dta$Prepreg_BMI)[2]
+total_sleep <- rep(0, length(sleep_seq))
+four_stage_proportion_m <- matrix(0, nrow = length(sleep_seq), ncol = 4)
+idx <- 0
+for(pred_bmi in sleep_seq){
+  idx <- idx + 1
+  jhat <- 4
+  That <- 0
+  pred_duration_sum <- c(0,0,0,0)
+  while(jhat != 5){
+    xlevels <- length(model_list[[jhat]][[1]]$xlevels[[1]])
+    timeInt <- as.factor(seq(1:xlevels))
+    len <- length(timeInt)
+    new_z <- rep(bs(x = c(That), knots = knots, Boundary.knots = boundary_knots,degree = 3), length(timeInt))
+    new_bmi <- rep(pred_bmi, length(timeInt))
+    bmi <- matrix(new_bmi, nrow = length(timeInt), byrow = T)
+    z <- matrix(new_z,nrow = length(timeInt), byrow = T)
+    newdata <- data.frame(timeInt, z, bmi)
+    hazards <- NULL
+    for (i in 1:4){
+      hazard <- predict(model_list[[jhat]][[i]], newdata = newdata, type = 'response')
+       hazards <- c( hazards, hazard)
+    }
+    cause_hazard_m <- matrix(hazards, ncol = 4, byrow = F)
+    hazard <- rowSums(cause_hazard_m)
+    survf <- c(1)
+    value <- 1
+    for (i in 2:length(hazard)){
+      value <- value * (1 - hazard[i-1])
+      survf <- c(survf, value)
+    }
+
+    f_m <- cause_hazard_m * survf
+    
+    cond_f_m <- t(t(f_m) / colSums(f_m))
+    next_state <- which.max(colSums(f_m))
+    
+    pred_duration <- 0
+    for(i in 1:len){
+      pred_duration <- pred_duration + i * cond_f_m[i, next_state]
+    }
+    pred_duration_sum[jhat] <- pred_duration_sum[jhat] + pred_duration
+    jhat <- seq(1:5)[-jhat][next_state]
+    tauhat <- pred_duration
+    That <- tauhat + That
+  
+  }
+  total_sleep[idx] <- sum(pred_duration_sum)
+  four_stage_proportion_m[idx,] <- pred_duration_sum / total_sleep[idx]
+  
+}
+
+plot(sleep_seq, total_sleep*5/60, xlab = "bmi",ylab = "predicted total sleep duration(hours)", main = "estimated relashionship between total sleep and age")
+
+plot(sleep_seq, four_stage_proportion_m[,1], xlab = "bmi",ylab = "predicted deep sleep proportion", main = "estimated relashionship between deep sleep proportion and bmi")
+
+plot(sleep_seq, four_stage_proportion_m[,2], xlab = "bmi",ylab = "predicted light sleep proportion", main = "estimated relashionship between light sleep proportion and bmi")
+
+plot(sleep_seq, four_stage_proportion_m[,3], xlab = "bmi",ylab = "predicted REM sleep proportion", main = "estimated relashionship between REM sleep proportion and bmi")
+
+plot(sleep_seq, four_stage_proportion_m[,4], xlab = "bmi",ylab = "predicted awake stage proportion", main = "estimated relashionship between awake sleep proportion and bmi")
+
+
+```
+
+### depression
+```{r}
+knots <- NULL
+boundary_knots <- range(0,dta$max_T)
+
+
+time_onset <- dta$tn
+markov_chain <- dta$value
+model_list <- list()
+covariate <- dta[,c(10,11,12,21)]
+
+#fit model
+for(head in 1:4){
+  model_sub_list <- list()
+  for(tail in 1:5){
+    if(tail == head){
+      next
+    }
+    else{
+      current_state <- markov_chain[1]
+      current_state_duration <- 1
+      result <- list()
+      t_n <- time_onset[1]
+      for (i in 2:length(markov_chain)) {
+        if (markov_chain[i] == current_state) {
+          current_state_duration <- current_state_duration + 1
+        } else {
+          if(current_state == head & markov_chain[i] == tail){
+            result <- append(result, list(c(current_state, current_state_duration,1,t_n, covariate[i-1,])))
+          }
+          else if(current_state == head){
+            result <- append(result, list(c(current_state, current_state_duration,0,t_n, covariate[i-1,])))
+          }
+          t_n <- time_onset[i]
+          current_state <- markov_chain[i]
+          current_state_duration <- 1
+        }
+      }
+      
+      result_matrix <- matrix(unlist(result), ncol = 8, byrow = TRUE)
+      duration = result_matrix[,2]
+      event <- result_matrix[,3]
+      dta_sojourn <- as.data.frame(result_matrix[,2:8])
+      colnames(dta_sojourn) <- c('duration','event','current_time',"age","bmi","first","depression")
+      b_spline <- bs(x = dta_sojourn$current_time, knots = knots, Boundary.knots = boundary_knots,degree = 3)
+      dta_sojourn$z <-  b_spline
+      dta_discrete <- dataLong(dta_sojourn, timeColumn = "duration", eventColumn = "event",timeAsFactor = T)
+      model <- glm(y~timeInt+z+depression, family = binomial(link = "logit"), data = dta_discrete)
+      model_sub_list <- c(model_sub_list, list(model))
+    }
+  }
+  model_list <- c(model_list, list(model_sub_list))
+}
+
+
+sleep_seq <- range(dta$Depression)[1]:range(dta$Depression)[2]
+total_sleep <- rep(0, length(sleep_seq))
+four_stage_proportion_m <- matrix(0, nrow = length(sleep_seq), ncol = 4)
+idx <- 0
+for(pred_depression in sleep_seq){
+  idx <- idx + 1
+  jhat <- 4
+  That <- 0
+  pred_duration_sum <- c(0,0,0,0)
+  while(jhat != 5){
+    xlevels <- length(model_list[[jhat]][[1]]$xlevels[[1]])
+    timeInt <- as.factor(seq(1:xlevels))
+    len <- length(timeInt)
+    new_z <- rep(bs(x = c(That), knots = knots, Boundary.knots = boundary_knots,degree = 3), length(timeInt))
+    new_depression <- rep(pred_depression, length(timeInt))
+    depression <- matrix(new_depression, nrow = length(timeInt), byrow = T)
+    z <- matrix(new_z,nrow = length(timeInt), byrow = T)
+    newdata <- data.frame(timeInt, z, depression)
+    hazards <- NULL
+    for (i in 1:4){
+      hazard <- predict(model_list[[jhat]][[i]], newdata = newdata, type = 'response')
+       hazards <- c( hazards, hazard)
+    }
+    cause_hazard_m <- matrix(hazards, ncol = 4, byrow = F)
+    hazard <- rowSums(cause_hazard_m)
+    survf <- c(1)
+    value <- 1
+    for (i in 2:length(hazard)){
+      value <- value * (1 - hazard[i-1])
+      survf <- c(survf, value)
+    }
+
+    f_m <- cause_hazard_m * survf
+    
+    cond_f_m <- t(t(f_m) / colSums(f_m))
+    next_state <- which.max(colSums(f_m))
+    
+    pred_duration <- 0
+    for(i in 1:len){
+      pred_duration <- pred_duration + i * cond_f_m[i, next_state]
+    }
+    pred_duration_sum[jhat] <- pred_duration_sum[jhat] + pred_duration
+    jhat <- seq(1:5)[-jhat][next_state]
+    tauhat <- pred_duration
+    That <- tauhat + That
+  
+  }
+  total_sleep[idx] <- sum(pred_duration_sum)
+  four_stage_proportion_m[idx,] <- pred_duration_sum / total_sleep[idx]
+  
+}
+
+plot(sleep_seq, total_sleep*5/60, xlab = "depression",ylab = "predicted total sleep duration(hours)", main = "estimated relashionship between total sleep and depression")
+
+plot(sleep_seq, four_stage_proportion_m[,1], xlab = "depression",ylab = "predicted deep sleep proportion", main = "estimated relashionship between deep sleep and depression")
+
+plot(sleep_seq, four_stage_proportion_m[,2], xlab = "depression",ylab = "predicted light sleep proportion", main = "estimated relashionship between light sleep and depression")
+
+plot(sleep_seq, four_stage_proportion_m[,3], xlab = "depression",ylab = "predicted REM sleep proportion", main = "estimated relashionship between REM sleep proportion and age")
+
+plot(sleep_seq, four_stage_proportion_m[,4], xlab = "depression",ylab = "predicted awake stage proportion", main = "estimated relashionship between awake sleep and depression")
+
+```
+
+
+
+
+```{r}
+knots <- NULL
+boundary_knots <- range(0,dta$max_T)
+
+
+time_onset <- dta$tn
+markov_chain <- dta$value
+model_list <- list()
+covariate <- dta[,c(10,11,12,21)]
+
+#fit model
+for(head in 1:4){
+  model_sub_list <- list()
+  for(tail in 1:5){
+    if(tail == head){
+      next
+    }
+    else{
+      current_state <- markov_chain[1]
+      current_state_duration <- 1
+      result <- list()
+      t_n <- time_onset[1]
+      for (i in 2:length(markov_chain)) {
+        if (markov_chain[i] == current_state) {
+          current_state_duration <- current_state_duration + 1
+        } else {
+          if(current_state == head & markov_chain[i] == tail){
+            result <- append(result, list(c(current_state, current_state_duration,1,t_n, covariate[i-1,])))
+          }
+          else if(current_state == head){
+            result <- append(result, list(c(current_state, current_state_duration,0,t_n, covariate[i-1,])))
+          }
+          t_n <- time_onset[i]
+          current_state <- markov_chain[i]
+          current_state_duration <- 1
+        }
+      }
+      
+      result_matrix <- matrix(unlist(result), ncol = 8, byrow = TRUE)
+      duration = result_matrix[,2]
+      event <- result_matrix[,3]
+      dta_sojourn <- as.data.frame(result_matrix[,2:8])
+      colnames(dta_sojourn) <- c('duration','event','current_time',"age","bmi","first","depression")
+      b_spline <- bs(x = dta_sojourn$current_time, knots = knots, Boundary.knots = boundary_knots,degree = 3)
+      dta_sojourn$z <-  b_spline
+      dta_discrete <- dataLong(dta_sojourn, timeColumn = "duration", eventColumn = "event",timeAsFactor = T)
+      model <- glm(y~timeInt+z+first, family = binomial(link = "logit"), data = dta_discrete)
+      model_sub_list <- c(model_sub_list, list(model))
+    }
+  }
+  model_list <- c(model_list, list(model_sub_list))
+}
+
+
+total_sleep <- rep(0, length(sleep_seq))
+four_stage_proportion_m <- matrix(0, nrow = 2, ncol = 5)
+idx <- 0
+for(pred_first in 0:1){
+  idx <- idx + 1
+  jhat <- 4
+  That <- 0
+  pred_duration_sum <- c(0,0,0,0)
+  while(jhat != 5){
+    # pred_T <- c(pred_T, That)
+    # pred_j <- c(pred_j, jhat)
+    xlevels <- length(model_list[[jhat]][[1]]$xlevels[[1]])
+    timeInt <- as.factor(seq(1:xlevels))
+    len <- length(timeInt)
+    new_z <- rep(bs(x = c(That), knots = knots, Boundary.knots = boundary_knots,degree = 3), length(timeInt))
+    new_first <- rep(pred_first, length(timeInt))
+    first <- matrix(new_first, nrow = length(timeInt), byrow = T)
+    z <- matrix(new_z,nrow = length(timeInt), byrow = T)
+    newdata <- data.frame(timeInt, z, first)
+    hazards <- NULL
+    for (i in 1:4){
+      hazard <- predict(model_list[[jhat]][[i]], newdata = newdata, type = 'response')
+       hazards <- c( hazards, hazard)
+    }
+    cause_hazard_m <- matrix(hazards, ncol = 4, byrow = F)
+    hazard <- rowSums(cause_hazard_m)
+    survf <- c(1)
+    value <- 1
+    for (i in 2:length(hazard)){
+      value <- value * (1 - hazard[i-1])
+      survf <- c(survf, value)
+    }
+
+    f_m <- cause_hazard_m * survf
+    
+    cond_f_m <- t(t(f_m) / colSums(f_m))
+    next_state <- which.max(colSums(f_m))
+    
+    pred_duration <- 0
+    for(i in 1:len){
+      pred_duration <- pred_duration + i * cond_f_m[i, next_state]
+    }
+    pred_duration_sum[jhat] <- pred_duration_sum[jhat] + pred_duration
+    jhat <- seq(1:5)[-jhat][next_state]
+    # print("next state is")
+    # print(jhat)
+    # print("state duration is")
+    tauhat <- pred_duration
+    # pred_tau <- c(pred_tau, tauhat)
+    # print(tauhat)
+    That <- tauhat + That
+  
+  }
+  # pred_T <- c(pred_T, That)
+  # pred_j <- c(pred_j, jhat)
+  total_sleep[idx] <- sum(pred_duration_sum)
+  four_stage_proportion_m[idx,] <- c(pred_duration_sum / total_sleep[idx], sum(pred_duration_sum))
+  
+}
+colnames(four_stage_proportion_m) <- c("Deep Sleep Proportion", "Light Sleep Proportion", "REM Sleep Proportion", "Awake Sleep Proportion", "Total sleep length")
+rownames(four_stage_proportion_m) <- c("Not First Preganancy", "First Preganancy")
+
+dta.out <- data.frame(four_stage_proportion_m)
+kable(four_stage_proportion_m, format = "html", caption = "Sample Data") %>%
+  kable_styling(full_width = FALSE)
+
+
+rowSums(four_stage_proportion_m[,1:4])
+```

@@ -1,0 +1,1549 @@
+---
+title: "Hypnogram Data Analysis"
+author: "曹浩群 虞协青"
+date: "`r Sys.Date()`"
+output: rmdformats::readthedown
+  
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(knitr)
+# library(rmdformats)
+library(kableExtra)
+library(dplyr)
+library(tseries)
+library(lubridate)
+library(DiscreteWeibull)
+library(tibble)
+library(ggplot2)
+library(hms)
+## Global options
+options(max.print="60")
+opts_knit$set(width=75)
+crimson = '#b31b1b'
+  crimson = '#b31b1b'   #crimson
+lightGray = '#cecece' #lightGray
+darkGray = '#606366'  #darkGray
+skyBlue = '#92b2c4'   #skyblue
+gold = '#fbb040'      #gold
+ecBlack = '#393f47'   #ecBlack
+```
+
+```{r}
+theme_ours_slanted <- function (base_size = 11, base_family = "") {
+    theme(
+      plot.title = element_text(color = "black", size = 16, hjust = 0.5, face = "bold"),
+      axis.title = element_text(color = "black", size = 12, hjust = 0.5),
+      panel.grid.major.x  = element_blank(),
+      panel.grid.major.y  = element_line(color = "white"),
+      panel.grid.minor  = element_blank(),
+      panel.background = element_rect(fill = "#E1F0FC"),
+      panel.border = element_rect(color = "steelblue4", fill = NA),
+      axis.line = element_line(color = "steelblue4"),
+      axis.ticks = element_line(color = "steelblue4"),
+      axis.text = element_text(color = "black"),
+      axis.text.x = element_text(angle = 90, hjust = 1)
+      )
+}
+```
+
+
+## plot the hypnogram to find sleep cycle
+```{r}
+dta <- read.csv("~/Desktop/UCInspire program summer 2023/5-min sleep new/unitef21 hypno.csv")
+```
+
+```{r}
+dta$date<-as.Date(dta$time)
+dta$daytime<-format(dta$time,format="%H:%M:%S")
+dta$daytime<- format(as.POSIXct(dta$time),format="%H:%M:%S")
+```
+
+```{r}
+for(i in 1:(nrow(dta)-1)){
+  if(dta[i,]$date != dta[i+1,]$date){
+    dta[i,]$value = 5
+  }
+}
+dta[nrow(dta),]$value=5
+
+```
+
+
+```{r}
+daydta <- dta %>% 
+  filter(date == '2021-04-10')
+daydta %>% ggplot(aes(x = daytime, y = value))+labs(x="Daytime",y="Sleeping Stage")+geom_point()+theme_ours_slanted()+ggtitle("hypnogram of unitef21 in 2021-04-10")
+```
+
+2 light 1 deep 3 REM 4 awake
+
+2->1
+2->3
+2->4
+
+3->1
+3->2
+3->4
+
+1->2
+1->3
+1->4
+
+4->1
+4->2
+4->3
+4->5
+
+# check whether there're any transitions from states other than 4 to 5 and put in the racket
+```{r}
+check<-FALSE
+rownum=list()
+for(i in 1:(nrow(dta)-1)){
+  if(dta[i,]$value!=4 & dta[i+1,]$value==5)
+  {
+    check<-TRUE
+    rownum<-append(rownum, i)
+  }
+}
+check
+rownum
+
+check1<-FALSE
+for(i in 1:(nrow(dta)-1)){
+  if(dta[i,]$value==1 & dta[i+1,]$value==5)
+  {
+    check<-TRUE
+  }
+}
+check1
+```
+
+
+Our empirical hazards function does not display the bathtub shape, probably because the resolution is not as high as 30 seconds.
+
+# get the resulting survival information of sojourn time(Duration) and censoring of transition from 4 to 1
+```{r}
+library(flexsurv)
+library(survival)
+markov_chain <- dta[1:46220,]$value
+current_state <- markov_chain[1]
+current_state_duration <- 1
+result <- list()
+head <- 4
+tail <- 1
+for (i in 2:length(markov_chain)) {
+  if (markov_chain[i] == current_state) {
+    current_state_duration <- current_state_duration + 1
+  } else {
+    if(current_state == head & markov_chain[i] == tail){
+      result <- append(result, list(c(current_state, current_state_duration,1)))
+    }
+    else if(current_state == head & markov_chain[i] != tail){
+      result <- append(result, list(c(current_state, current_state_duration,0)))
+    }
+    current_state <- markov_chain[i]
+    current_state_duration <- 1
+  }
+}
+
+result_matrix <- matrix(unlist(result), ncol = 3, byrow = TRUE)
+duration = result_matrix[,2]
+event <- result_matrix[,3]
+new41sojourntime <- as.data.frame(result_matrix[,2:3])
+new41sojourntime<-new41sojourntime %>% filter(V2==1) %>% select(V1)
+hist(new41sojourntime$V1)
+
+```
+
+
+# calculate and plot the empirical hazard function and empirical cumulative hazard
+```{r}
+surv_obj <- Surv(duration, event)
+surv_obj
+surv_fit <- survfit(surv_obj ~ 1)
+plot(surv_fit, xlab = "Time (epochs)", ylab = "Survival probability", main = "Estimated Survival Curve")
+
+hazard_fit <- survfit(surv_obj ~ 1, type = "fleming-harrington")
+summary(hazard_fit)
+hazard_data <- data.frame(time = hazard_fit$time, hazard = hazard_fit$cumhaz)
+
+plot(hazard_data$time, hazard_data$hazard, type = "l", xlab = "Time (epochs)", ylab = "Hazard", main = paste("Estimated Cummulative Hazard Curve", head,'to',tail))
+
+dta_sojourn <- as.data.frame(result_matrix[,2:3])
+time_point <- dta_sojourn %>% 
+  filter(V2 == 1) %>% 
+  select(V1) %>% 
+  unique()
+time_point <- sort(time_point$V1)
+time_point
+empirical_hazards <- rep(0, length(time_point))
+empirical_chazards <- rep(0, length(time_point))
+i <- 1
+for (t in time_point){
+  denominator <- dta_sojourn %>% 
+    filter(V1 >= t) %>% 
+    summarise(n = n())
+  numerator <- dta_sojourn %>% 
+    filter(V1 == t & V2 == 1) %>% 
+    summarise(n = n())
+  empirical_hazards[i] <- numerator/denominator
+  i <- i+1
+}
+empirical_hazards <-unlist(empirical_hazards)
+i <- 1
+for (value in empirical_hazards){
+  empirical_chazards[i] = sum(empirical_hazards[1:i])
+  i = i+1
+}
+
+plot(time_point, empirical_hazards, xlab = "Time (epochs)", ylab = "Hazard", main = paste("Empirical  Hazard Curve", head,'to',tail))
+
+plot(time_point, empirical_chazards, xlab = "Time (epochs)", ylab = "Hazard", main = paste("Empirical Cummulative Hazard", head,'to',tail))
+```
+
+# fit a Weibull distribution to the survival function
+```{r}
+library(survminer)
+dta_sojourn <- as.data.frame(result_matrix[,2:3])
+fitg <- flexsurvreg(formula = Surv(V1, V2) ~ 1, data = dta_sojourn, dist="weibull")
+fitg
+plot(fitg)
+```
+$p_{41}$=1.3316, $\lambda_{41}$=17.6481
+
+# get the resulting survival information of sojourn time(Duration) and censoring of transition from 4 to 2
+```{r}
+library(flexsurv)
+library(survival)
+markov_chain <- dta[1:46220,]$value
+current_state <- markov_chain[1]
+current_state_duration <- 1
+result <- list()
+head <- 4
+tail <- 2
+for (i in 2:length(markov_chain)) {
+  if (markov_chain[i] == current_state) {
+    current_state_duration <- current_state_duration + 1
+  } else {
+    if(current_state == head & markov_chain[i] == tail){
+      result <- append(result, list(c(current_state, current_state_duration,1)))
+    }
+    else if(current_state == head & markov_chain[i] != tail){
+      result <- append(result, list(c(current_state, current_state_duration,0)))
+    }
+    current_state <- markov_chain[i]
+    current_state_duration <- 1
+  }
+}
+
+result_matrix <- matrix(unlist(result), ncol = 3, byrow = TRUE)
+duration = result_matrix[,2]
+event <- result_matrix[,3]
+new42sojourntime <- as.data.frame(result_matrix[,2:3])
+new42sojourntime<-new42sojourntime %>% filter(V2==1) %>% select(V1)
+max(new42sojourntime$V1)
+Mode <- function(x) {
+  ux <- unique(x)
+  ux[which.max(tabulate(match(x, ux)))]
+}
+Mode(new42sojourntime$V1)
+mean(new42sojourntime$V1)
+sort(unique(new42sojourntime$V1))
+hist(new42sojourntime$V1,freq=FALSE,breaks=33,right = FALSE,xlab="sojourn time from 4 to 2(epochs)",ylab="probability",main="historgram of sojourn time distribution from 4 to 2")
+mean(new42sojourntime$V1)
+x_dgeom <- seq(1,33, by = 1) 
+y_dgeom <- dgeom(x_dgeom, prob = 0.3302512)
+plot(y_dgeom,xlab="sojourn time from 4 to 2(epochs)",ylab="probability", main="sojourn time distribution from 4 to 2(parametrized by geometric)")
+(1-0.3302512)/0.3302512
+y_dnbinom<-dnbinom(x_dgeom, size=0.7318656, mu=2.027701, log = FALSE)
+plot(y_dnbinom,xlab="sojourn time from 4 to 2(epochs)",ylab="probability", main="sojourn time distribution from 4 to 2(parametrized by negative binomial)")
+y_ddweibull<-ddweibull(x_dgeom,0.6187902,0.8752408)
+plot(y_ddweibull,xlab="sojourn time from 4 to 2(epochs)",ylab="probability", main="sojourn time distribution from 4 to 2(parametrized by discrete weibull)")
+```
+# Use Bootstrap method on the original distribution of $\Tau$ conditioned on i and j to get the expected sojourn time here it is the conditional distribution of sojourn time from state 4 to state 2.
+```{r}
+set.seed(1) 
+
+B = 10000   # Number of bootstrap samples to draw
+store_mean = rep(0, B) # Vector to store B means
+
+# For loop to draw B bootstrap samples
+ for (n in 1:B){
+  # Random sample of nrow values
+  boot.id = sample(1:nrow(new42sojourntime), size = nrow(new42sojourntime), replace = TRUE) 
+  new42sojourntime.boot = new42sojourntime[boot.id,] 
+  # Store sample mean of the bootstrapped data in 
+  # row n of the store_mean vector.
+  store_mean[n] = mean(new42sojourntime.boot) 
+ } # End for loop
+
+# Create a histogram of B mean values: 
+hist(store_mean, breaks = 20, freq = FALSE, col = "black",
+     border ='white', 
+    main = 'Bootstrap Distribution of sojourn times from state 4 to state 2',
+     xlab = 'Mean sojourn time from state 4 to state 2')
+mean(store_mean)
+abline(v=mean(store_mean),col=crimson, lwd=3 )
+```
+
+# calculate and plot the empirical hazard function and empirical cumulative hazard
+```{r}
+surv_obj <- Surv(duration, event)
+surv_fit <- survfit(surv_obj ~ 1)
+plot(surv_fit, xlab = "Time (epochs)", ylab = "Survival probability", main = "Estimated Survival Curve")
+
+hazard_fit <- survfit(surv_obj ~ 1, type = "fleming-harrington")
+summary(hazard_fit)
+hazard_data <- data.frame(time = hazard_fit$time, hazard = hazard_fit$cumhaz)
+
+plot(hazard_data$time, hazard_data$hazard, type = "l", xlab = "Time (epochs)", ylab = "Hazard", main = paste("Estimated Cummulative Hazard Curve", head,'to',tail))
+
+dta_sojourn <- as.data.frame(result_matrix[,2:3])
+time_point <- dta_sojourn %>% 
+  filter(V2 == 1) %>% 
+  select(V1) %>% 
+  unique()
+time_point <- sort(time_point$V1)
+time_point
+empirical_hazards <- rep(0, length(time_point))
+empirical_chazards <- rep(0, length(time_point))
+i <- 1
+for (t in time_point){
+  denominator <- dta_sojourn %>% 
+    filter(V1 >= t) %>% 
+    count()
+  numerator <- dta_sojourn %>% 
+    filter(V1 == t & V2 == 1) %>% 
+    count()
+  empirical_hazards[i] <- numerator/denominator
+  i <- i+1
+}
+empirical_hazards <-unlist(empirical_hazards)
+i <- 1
+for (value in empirical_hazards){
+  empirical_chazards[i] = sum(empirical_hazards[1:i])
+  i = i+1
+}
+
+plot(time_point, empirical_hazards, xlab = "Time (epochs)", ylab = "Hazard", main = paste("Empirical  Hazard Curve", head,'to',tail))
+
+plot(time_point, empirical_chazards, xlab = "Time (epochs)", ylab = "Hazard", main = paste("Empirical Cummulative Hazard", head,'to',tail))
+```
+
+# fit a Weibull distribution to the survival function
+```{r}
+library(survminer)
+dta_sojourn <- as.data.frame(result_matrix[,2:3])
+fitg <- flexsurvreg(formula = Surv(V1, V2) ~ 1, data = dta_sojourn, dist="weibull")
+fitg
+plot(fitg,xlab="Time(epochs)",ylab="survival probability",main="The Survival function from state 4 to state 2 fitted by a Weibull distribution")
+```
+$p_{42}$=1.1701, $\lambda_{42}$=3.6497
+
+# get the resulting survival information of sojourn time(Duration) and censoring of transition from 4 to 3
+```{r}
+library(flexsurv)
+library(survival)
+markov_chain <- dta[1:46220,]$value
+current_state <- markov_chain[1]
+current_state_duration <- 1
+result <- list()
+head <- 4
+tail <- 3
+for (i in 2:length(markov_chain)) {
+  if (markov_chain[i] == current_state) {
+    current_state_duration <- current_state_duration + 1
+  } else {
+    if(current_state == head & markov_chain[i] == tail){
+      result <- append(result, list(c(current_state, current_state_duration,1)))
+    }
+    else if(current_state == head & markov_chain[i] != tail){
+      result <- append(result, list(c(current_state, current_state_duration,0)))
+    }
+    current_state <- markov_chain[i]
+    current_state_duration <- 1
+  }
+}
+
+result_matrix <- matrix(unlist(result), ncol = 3, byrow = TRUE)
+duration = result_matrix[,2]
+event <- result_matrix[,3]
+new43sojourntime <- as.data.frame(result_matrix[,2:3])
+new43sojourntime<-new43sojourntime %>% filter(V2==1) %>% select(V1)
+hist(new43sojourntime$V1)
+
+```
+
+
+# calculate and plot the empirical hazard function and empirical cumulative hazard
+```{r}
+surv_obj <- Surv(duration, event)
+surv_fit <- survfit(surv_obj ~ 1)
+plot(surv_fit, xlab = "Time (epochs)", ylab = "Survival probability", main = "Estimated Survival Curve")
+
+hazard_fit <- survfit(surv_obj ~ 1, type = "fleming-harrington")
+summary(hazard_fit)
+hazard_data <- data.frame(time = hazard_fit$time, hazard = hazard_fit$cumhaz)
+
+plot(hazard_data$time, hazard_data$hazard, type = "l", xlab = "Time (epochs)", ylab = "Hazard", main = paste("Estimated Cummulative Hazard Curve", head,'to',tail))
+
+dta_sojourn <- as.data.frame(result_matrix[,2:3])
+time_point <- dta_sojourn %>% 
+  filter(V2 == 1) %>% 
+  select(V1) %>% 
+  unique()
+time_point <- sort(time_point$V1)
+time_point
+empirical_hazards <- rep(0, length(time_point))
+empirical_chazards <- rep(0, length(time_point))
+i <- 1
+for (t in time_point){
+  denominator <- dta_sojourn %>% 
+    filter(V1 >= t) %>% 
+    count()
+  numerator <- dta_sojourn %>% 
+    filter(V1 == t & V2 == 1) %>% 
+    count()
+  empirical_hazards[i] <- numerator/denominator
+  i <- i+1
+}
+empirical_hazards <-unlist(empirical_hazards)
+i <- 1
+for (value in empirical_hazards){
+  empirical_chazards[i] = sum(empirical_hazards[1:i])
+  i = i+1
+}
+
+plot(time_point, empirical_hazards, xlab = "Time (epochs)", ylab = "Hazard", main = paste("Empirical  Hazard Curve", head,'to',tail))
+
+plot(time_point, empirical_chazards, xlab = "Time (epochs)", ylab = "Hazard", main = paste("Empirical Cummulative Hazard", head,'to',tail))
+```
+
+# fit a Weibull distribution to the survival function
+```{r}
+library(survminer)
+dta_sojourn <- as.data.frame(result_matrix[,2:3])
+fitg <- flexsurvreg(formula = Surv(V1, V2) ~ 1, data = dta_sojourn, dist="weibull")
+fitg
+plot(fitg)
+```
+
+$p_{43}$=1.1335, $\lambda_{43}$= 27.7654 
+
+# get the resulting survival information of sojourn time(Duration) and censoring of transition from 4 to 5
+```{r}
+library(flexsurv)
+library(survival)
+markov_chain <- dta[1:46220,]$value
+current_state <- markov_chain[1]
+current_state_duration <- 1
+result <- list()
+head <- 4
+tail <- 5
+for (i in 2:length(markov_chain)) {
+  if (markov_chain[i] == current_state) {
+    current_state_duration <- current_state_duration + 1
+  } else {
+    if(current_state == head & markov_chain[i] == tail){
+      result <- append(result, list(c(current_state, current_state_duration,1)))
+    }
+    else if(current_state == head & markov_chain[i] != tail){
+      result <- append(result, list(c(current_state, current_state_duration,0)))
+    }
+    current_state <- markov_chain[i]
+    current_state_duration <- 1
+  }
+}
+
+result_matrix <- matrix(unlist(result), ncol = 3, byrow = TRUE)
+duration = result_matrix[,2]
+event <- result_matrix[,3]
+new41sojourntime <- as.data.frame(result_matrix[,2:3])
+new41sojourntime<-new41sojourntime %>% filter(V2==1) %>% select(V1)
+```
+
+
+# calculate and plot the empirical hazard function and empirical cumulative hazard
+```{r}
+surv_obj <- Surv(duration, event)
+surv_fit <- survfit(surv_obj ~ 1)
+plot(surv_fit, xlab = "Time (epochs)", ylab = "Survival probability", main = "Estimated Survival Curve")
+
+hazard_fit <- survfit(surv_obj ~ 1, type = "fleming-harrington")
+summary(hazard_fit)
+hazard_data <- data.frame(time = hazard_fit$time, hazard = hazard_fit$cumhaz)
+
+plot(hazard_data$time, hazard_data$hazard, type = "l", xlab = "Time (epochs)", ylab = "Hazard", main = paste("Estimated Cummulative Hazard Curve", head,'to',tail))
+
+dta_sojourn <- as.data.frame(result_matrix[,2:3])
+time_point <- dta_sojourn %>% 
+  filter(V2 == 1) %>% 
+  select(V1) %>% 
+  unique()
+time_point <- sort(time_point$V1)
+time_point
+empirical_hazards <- rep(0, length(time_point))
+empirical_chazards <- rep(0, length(time_point))
+i <- 1
+for (t in time_point){
+  denominator <- dta_sojourn %>% 
+    filter(V1 >= t) %>% 
+    count()
+  numerator <- dta_sojourn %>% 
+    filter(V1 == t & V2 == 1) %>% 
+    count()
+  empirical_hazards[i] <- numerator/denominator
+  i <- i+1
+}
+empirical_hazards <-unlist(empirical_hazards)
+i <- 1
+for (value in empirical_hazards){
+  empirical_chazards[i] = sum(empirical_hazards[1:i])
+  i = i+1
+}
+
+plot(time_point, empirical_hazards, xlab = "Time (epochs)", ylab = "Hazard", main = paste("Empirical  Hazard Curve", head,'to',tail))
+
+plot(time_point, empirical_chazards, xlab = "Time (epochs)", ylab = "Hazard", main = paste("Empirical Cummulative Hazard", head,'to',tail))
+```
+
+# fit a Weibull distribution to the survival function
+```{r}
+library(survminer)
+dta_sojourn <- as.data.frame(result_matrix[,2:3])
+fitg <- flexsurvreg(formula = Surv(V1, V2) ~ 1, data = dta_sojourn, dist="weibull")
+fitg
+plot(fitg)
+```
+$p_{45}$=0.9889, $\lambda_{45}$= 20.1286
+
+# get the resulting survival information of sojourn time(Duration) and censoring of transition from 3 to 1
+```{r}
+library(flexsurv)
+library(survival)
+markov_chain <- dta[1:46220,]$value
+current_state <- markov_chain[1]
+current_state_duration <- 1
+result <- list()
+head <- 3
+tail <- 1
+for (i in 2:length(markov_chain)) {
+  if (markov_chain[i] == current_state) {
+    current_state_duration <- current_state_duration + 1
+  } else {
+    if(current_state == head & markov_chain[i] == tail){
+      result <- append(result, list(c(current_state, current_state_duration,1)))
+    }
+    else if(current_state == head & markov_chain[i] != tail){
+      result <- append(result, list(c(current_state, current_state_duration,0)))
+    }
+    current_state <- markov_chain[i]
+    current_state_duration <- 1
+  }
+}
+
+result_matrix <- matrix(unlist(result), ncol = 3, byrow = TRUE)
+duration = result_matrix[,2]
+event <- result_matrix[,3]
+new31sojourntime <- as.data.frame(result_matrix[,2:3])
+new31sojourntime<-new31sojourntime %>% filter(V2==1) %>% select(V1)
+hist(new31sojourntime$V1)
+```
+
+
+# calculate and plot the empirical hazard function and empirical cumulative hazard
+```{r}
+surv_obj <- Surv(duration, event)
+surv_fit <- survfit(surv_obj ~ 1)
+plot(surv_fit, xlab = "Time (epochs)", ylab = "Survival probability", main = "Estimated Survival Curve")
+
+hazard_fit <- survfit(surv_obj ~ 1, type = "fleming-harrington")
+summary(hazard_fit)
+hazard_data <- data.frame(time = hazard_fit$time, hazard = hazard_fit$cumhaz)
+
+plot(hazard_data$time, hazard_data$hazard, type = "l", xlab = "Time (epochs)", ylab = "Hazard", main = paste("Estimated Cummulative Hazard Curve", head,'to',tail))
+
+dta_sojourn <- as.data.frame(result_matrix[,2:3])
+time_point <- dta_sojourn %>% 
+  filter(V2 == 1) %>% 
+  select(V1) %>% 
+  unique()
+time_point <- sort(time_point$V1)
+time_point
+empirical_hazards <- rep(0, length(time_point))
+empirical_chazards <- rep(0, length(time_point))
+i <- 1
+for (t in time_point){
+  denominator <- dta_sojourn %>% 
+    filter(V1 >= t) %>% 
+    count()
+  numerator <- dta_sojourn %>% 
+    filter(V1 == t & V2 == 1) %>% 
+    count()
+  empirical_hazards[i] <- numerator/denominator
+  i <- i+1
+}
+empirical_hazards <-unlist(empirical_hazards)
+i <- 1
+for (value in empirical_hazards){
+  empirical_chazards[i] = sum(empirical_hazards[1:i])
+  i = i+1
+}
+
+plot(time_point, empirical_hazards, xlab = "Time (epochs)", ylab = "Hazard", main = paste("Empirical  Hazard Curve", head,'to',tail))
+
+plot(time_point, empirical_chazards, xlab = "Time (epochs)", ylab = "Hazard", main = paste("Empirical Cummulative Hazard", head,'to',tail))
+```
+
+# fit a Weibull distribution to the survival function
+```{r}
+library(survminer)
+dta_sojourn <- as.data.frame(result_matrix[,2:3])
+fitg <- flexsurvreg(formula = Surv(V1, V2) ~ 1, data = dta_sojourn, dist="weibull")
+fitg
+plot(fitg)
+```
+$p_{31}$= 1.2244 , $\lambda_{31}$= 27.8234
+
+# get the resulting survival information of sojourn time(Duration) and censoring of transition from 3 to 2
+```{r}
+library(flexsurv)
+library(survival)
+markov_chain <- dta[1:46220,]$value
+current_state <- markov_chain[1]
+current_state_duration <- 1
+result <- list()
+head <- 3
+tail <- 2
+for (i in 2:length(markov_chain)) {
+  if (markov_chain[i] == current_state) {
+    current_state_duration <- current_state_duration + 1
+  } else {
+    if(current_state == head & markov_chain[i] == tail){
+      result <- append(result, list(c(current_state, current_state_duration,1)))
+    }
+    else if(current_state == head & markov_chain[i] != tail){
+      result <- append(result, list(c(current_state, current_state_duration,0)))
+    }
+    current_state <- markov_chain[i]
+    current_state_duration <- 1
+  }
+}
+
+result_matrix <- matrix(unlist(result), ncol = 3, byrow = TRUE)
+duration = result_matrix[,2]
+event <- result_matrix[,3]
+new32sojourntime <- as.data.frame(result_matrix[,2:3])
+new32sojourntime<-new32sojourntime %>% filter(V2==1) %>% select(V1)
+hist(new32sojourntime$V1)
+```
+
+
+# calculate and plot the empirical hazard function and empirical cumulative hazard
+```{r}
+surv_obj <- Surv(duration, event)
+surv_fit <- survfit(surv_obj ~ 1)
+plot(surv_fit, xlab = "Time (epochs)", ylab = "Survival probability", main = "Estimated Survival Curve")
+
+hazard_fit <- survfit(surv_obj ~ 1, type = "fleming-harrington")
+summary(hazard_fit)
+hazard_data <- data.frame(time = hazard_fit$time, hazard = hazard_fit$cumhaz)
+
+plot(hazard_data$time, hazard_data$hazard, type = "l", xlab = "Time (epochs)", ylab = "Hazard", main = paste("Estimated Cummulative Hazard Curve", head,'to',tail))
+
+dta_sojourn <- as.data.frame(result_matrix[,2:3])
+time_point <- dta_sojourn %>% 
+  filter(V2 == 1) %>% 
+  select(V1) %>% 
+  unique()
+time_point <- sort(time_point$V1)
+time_point
+empirical_hazards <- rep(0, length(time_point))
+empirical_chazards <- rep(0, length(time_point))
+i <- 1
+for (t in time_point){
+  denominator <- dta_sojourn %>% 
+    filter(V1 >= t) %>% 
+    count()
+  numerator <- dta_sojourn %>% 
+    filter(V1 == t & V2 == 1) %>% 
+    count()
+  empirical_hazards[i] <- numerator/denominator
+  i <- i+1
+}
+empirical_hazards <-unlist(empirical_hazards)
+i <- 1
+for (value in empirical_hazards){
+  empirical_chazards[i] = sum(empirical_hazards[1:i])
+  i = i+1
+}
+
+plot(time_point, empirical_hazards, xlab = "Time (epochs)", ylab = "Hazard", main = paste("Empirical  Hazard Curve", head,'to',tail))
+
+plot(time_point, empirical_chazards, xlab = "Time (epochs)", ylab = "Hazard", main = paste("Empirical Cummulative Hazard", head,'to',tail))
+```
+
+# fit a Weibull distribution to the survival function
+```{r}
+library(survminer)
+dta_sojourn <- as.data.frame(result_matrix[,2:3])
+fitg <- flexsurvreg(formula = Surv(V1, V2) ~ 1, data = dta_sojourn, dist="weibull")
+fitg
+plot(fitg,xlab="Time(epochs)",ylab="survival probability",main="The Survival function from state 3 to state 2 fitted by a Weibull distribution")
+```
+$p_{32}$= 1.4903, $\lambda_{32}$=4.9553
+
+# get the resulting survival information of sojourn time(Duration) and censoring of transition from 3 to 4
+```{r}
+library(flexsurv)
+library(survival)
+markov_chain <- dta[1:46220,]$value
+current_state <- markov_chain[1]
+current_state_duration <- 1
+result <- list()
+head <- 3
+tail <- 4
+for (i in 2:length(markov_chain)) {
+  if (markov_chain[i] == current_state) {
+    current_state_duration <- current_state_duration + 1
+  } else {
+    if(current_state == head & markov_chain[i] == tail){
+      result <- append(result, list(c(current_state, current_state_duration,1)))
+    }
+    else if(current_state == head & markov_chain[i] != tail){
+      result <- append(result, list(c(current_state, current_state_duration,0)))
+    }
+    current_state <- markov_chain[i]
+    current_state_duration <- 1
+  }
+}
+
+result_matrix <- matrix(unlist(result), ncol = 3, byrow = TRUE)
+duration = result_matrix[,2]
+event <- result_matrix[,3]
+```
+
+
+# calculate and plot the empirical hazard function and empirical cumulative hazard
+```{r}
+surv_obj <- Surv(duration, event)
+surv_fit <- survfit(surv_obj ~ 1)
+plot(surv_fit, xlab = "Time (epochs)", ylab = "Survival probability", main = "Estimated Survival Curve")
+
+hazard_fit <- survfit(surv_obj ~ 1, type = "fleming-harrington")
+summary(hazard_fit)
+hazard_data <- data.frame(time = hazard_fit$time, hazard = hazard_fit$cumhaz)
+
+plot(hazard_data$time, hazard_data$hazard, type = "l", xlab = "Time (epochs)", ylab = "Hazard", main = paste("Estimated Cummulative Hazard Curve", head,'to',tail))
+
+dta_sojourn <- as.data.frame(result_matrix[,2:3])
+time_point <- dta_sojourn %>% 
+  filter(V2 == 1) %>% 
+  select(V1) %>% 
+  unique()
+time_point <- sort(time_point$V1)
+time_point
+empirical_hazards <- rep(0, length(time_point))
+empirical_chazards <- rep(0, length(time_point))
+i <- 1
+for (t in time_point){
+  denominator <- dta_sojourn %>% 
+    filter(V1 >= t) %>% 
+    count()
+  numerator <- dta_sojourn %>% 
+    filter(V1 == t & V2 == 1) %>% 
+    count()
+  empirical_hazards[i] <- numerator/denominator
+  i <- i+1
+}
+empirical_hazards <-unlist(empirical_hazards)
+i <- 1
+for (value in empirical_hazards){
+  empirical_chazards[i] = sum(empirical_hazards[1:i])
+  i = i+1
+}
+
+plot(time_point, empirical_hazards, xlab = "Time (epochs)", ylab = "Hazard", main = paste("Empirical  Hazard Curve", head,'to',tail))
+
+plot(time_point, empirical_chazards, xlab = "Time (epochs)", ylab = "Hazard", main = paste("Empirical Cummulative Hazard", head,'to',tail))
+```
+
+# fit a Weibull distribution to the survival function
+```{r}
+library(survminer)
+dta_sojourn <- as.data.frame(result_matrix[,2:3])
+fitg <- flexsurvreg(formula = Surv(V1, V2) ~ 1, data = dta_sojourn, dist="weibull")
+fitg
+plot(fitg)
+```
+$p_{34}$= 1.514, $\lambda_{34}$=12.465
+
+# get the resulting survival information of sojourn time(Duration) and censoring of transition from 3 to 5
+```{r}
+library(flexsurv)
+library(survival)
+markov_chain <- dta[1:46220,]$value
+current_state <- markov_chain[1]
+current_state_duration <- 1
+result <- list()
+head <- 3
+tail <- 5
+for (i in 2:length(markov_chain)) {
+  if (markov_chain[i] == current_state) {
+    current_state_duration <- current_state_duration + 1
+  } else {
+    if(current_state == head & markov_chain[i] == tail){
+      result <- append(result, list(c(current_state, current_state_duration,1)))
+    }
+    else if(current_state == head & markov_chain[i] != tail){
+      result <- append(result, list(c(current_state, current_state_duration,0)))
+    }
+    current_state <- markov_chain[i]
+    current_state_duration <- 1
+  }
+}
+
+result_matrix <- matrix(unlist(result), ncol = 3, byrow = TRUE)
+duration = result_matrix[,2]
+event <- result_matrix[,3]
+```
+
+
+# calculate and plot the empirical hazard function and empirical cumulative hazard
+```{r}
+surv_obj <- Surv(duration, event)
+surv_fit <- survfit(surv_obj ~ 1)
+plot(surv_fit, xlab = "Time (epochs)", ylab = "Survival probability", main = "Estimated Survival Curve")
+
+hazard_fit <- survfit(surv_obj ~ 1, type = "fleming-harrington")
+summary(hazard_fit)
+hazard_data <- data.frame(time = hazard_fit$time, hazard = hazard_fit$cumhaz)
+
+plot(hazard_data$time, hazard_data$hazard, type = "l", xlab = "Time (epochs)", ylab = "Hazard", main = paste("Estimated Cummulative Hazard Curve", head,'to',tail))
+
+dta_sojourn <- as.data.frame(result_matrix[,2:3])
+time_point <- dta_sojourn %>% 
+  filter(V2 == 1) %>% 
+  select(V1) %>% 
+  unique()
+time_point <- sort(time_point$V1)
+time_point
+empirical_hazards <- rep(0, length(time_point))
+empirical_chazards <- rep(0, length(time_point))
+i <- 1
+for (t in time_point){
+  denominator <- dta_sojourn %>% 
+    filter(V1 >= t) %>% 
+    count()
+  numerator <- dta_sojourn %>% 
+    filter(V1 == t & V2 == 1) %>% 
+    count()
+  empirical_hazards[i] <- numerator/denominator
+  i <- i+1
+}
+empirical_hazards <-unlist(empirical_hazards)
+i <- 1
+for (value in empirical_hazards){
+  empirical_chazards[i] = sum(empirical_hazards[1:i])
+  i = i+1
+}
+
+plot(time_point, empirical_hazards, xlab = "Time (epochs)", ylab = "Hazard", main = paste("Empirical  Hazard Curve", head,'to',tail))
+
+plot(time_point, empirical_chazards, xlab = "Time (epochs)", ylab = "Hazard", main = paste("Empirical Cummulative Hazard", head,'to',tail))
+```
+
+# fit a Weibull distribution to the survival function
+```{r}
+library(survminer)
+dta_sojourn <- as.data.frame(result_matrix[,2:3])
+fitg <- flexsurvreg(formula = Surv(V1, V2) ~ 1, data = dta_sojourn, dist="weibull")
+fitg
+plot(fitg)
+```
+$p_{35}$=1.818 , $\lambda_{35}$=36.966 
+
+# get the resulting survival information of sojourn time(Duration) and censoring of transition from 2 to 1
+```{r}
+library(flexsurv)
+library(survival)
+markov_chain <- dta[1:46220,]$value
+current_state <- markov_chain[1]
+current_state_duration <- 1
+result <- list()
+head <- 2
+tail <- 1
+for (i in 2:length(markov_chain)) {
+  if (markov_chain[i] == current_state) {
+    current_state_duration <- current_state_duration + 1
+  } else {
+    if(current_state == head & markov_chain[i] == tail){
+      result <- append(result, list(c(current_state, current_state_duration,1)))
+    }
+    else if(current_state == head & markov_chain[i] != tail){
+      result <- append(result, list(c(current_state, current_state_duration,0)))
+    }
+    current_state <- markov_chain[i]
+    current_state_duration <- 1
+  }
+}
+
+result_matrix <- matrix(unlist(result), ncol = 3, byrow = TRUE)
+duration = result_matrix[,2]
+event <- result_matrix[,3]
+new21sojourntime <- as.data.frame(result_matrix[,2:3])
+new21sojourntime<-new21sojourntime %>% filter(V2==1) %>% select(V1)
+max(new21sojourntime$V1)
+Mode <- function(x) {
+  ux <- unique(x)
+  ux[which.max(tabulate(match(x, ux)))]
+}
+Mode(new21sojourntime$V1)
+mean(new21sojourntime$V1)
+sort(unique(new21sojourntime$V1))
+hist(new21sojourntime$V1,freq=TRUE,breaks=26,right = FALSE)
+```
+
+# Use Bootstrap method on the original distribution of $\Tau$ conditioned on i and j to get the expected sojourn time here it is the conditional distribution of sojourn time from state 2 to state 1.
+```{r}
+set.seed(1) 
+
+B = 10000   # Number of bootstrap samples to draw
+store_mean = rep(0, B) # Vector to store B means
+
+# For loop to draw B bootstrap samples
+ for (n in 1:B){
+  # Random sample of nrow values
+  boot.id = sample(1:nrow(new21sojourntime), size = nrow(new21sojourntime), replace = TRUE) 
+  new21sojourntime.boot = new21sojourntime[boot.id,] 
+  # Store sample mean of the bootstrapped data in 
+  # row n of the store_mean vector.
+  store_mean[n] = mean(new21sojourntime.boot) 
+ } # End for loop
+
+# Create a histogram of B mean values: 
+hist(store_mean, breaks = 20, freq = FALSE, col = "black",
+     border ='white', 
+    main = 'Bootstrap Distribution of sojourn time mean from state 2 to state 1',
+     xlab = 'Mean sojourn time from state 2 to state 1')
+mean(store_mean)
+abline(v=mean(store_mean),col=crimson, lwd=3 )
+```
+
+
+
+
+
+
+
+# calculate and plot the empirical hazard function and empirical cumulative hazard
+```{r}
+surv_obj <- Surv(duration, event)
+surv_fit <- survfit(surv_obj ~ 1)
+plot(surv_fit, xlab = "Time (epochs)", ylab = "Survival probability", main = "Estimated Survival Curve")
+
+hazard_fit <- survfit(surv_obj ~ 1, type = "fleming-harrington")
+summary(hazard_fit)
+hazard_data <- data.frame(time = hazard_fit$time, hazard = hazard_fit$cumhaz)
+
+plot(hazard_data$time, hazard_data$hazard, type = "l", xlab = "Time (epochs)", ylab = "Hazard", main = paste("Estimated Cummulative Hazard Curve", head,'to',tail))
+
+dta_sojourn <- as.data.frame(result_matrix[,2:3])
+time_point <- dta_sojourn %>% 
+  filter(V2 == 1) %>% 
+  select(V1) %>% 
+  unique()
+time_point <- sort(time_point$V1)
+time_point
+empirical_hazards <- rep(0, length(time_point))
+empirical_chazards <- rep(0, length(time_point))
+i <- 1
+for (t in time_point){
+  denominator <- dta_sojourn %>% 
+    filter(V1 >= t) %>% 
+    count()
+  numerator <- dta_sojourn %>% 
+    filter(V1 == t & V2 == 1) %>% 
+    count()
+  empirical_hazards[i] <- numerator/denominator
+  i <- i+1
+}
+empirical_hazards <-unlist(empirical_hazards)
+i <- 1
+for (value in empirical_hazards){
+  empirical_chazards[i] = sum(empirical_hazards[1:i])
+  i = i+1
+}
+
+plot(time_point, empirical_hazards, xlab = "Time (epochs)", ylab = "Hazard", main = paste("Empirical  Hazard Curve", head,'to',tail))
+
+plot(time_point, empirical_chazards, xlab = "Time (epochs)", ylab = "Hazard", main = paste("Empirical Cummulative Hazard", head,'to',tail))
+```
+
+# fit a Weibull distribution to the survival function
+```{r}
+library(survminer)
+dta_sojourn <- as.data.frame(result_matrix[,2:3])
+fitg <- flexsurvreg(formula = Surv(V1, V2) ~ 1, data = dta_sojourn, dist="weibull")
+fitg
+plot(fitg)
+```
+$p_{21}$=1.274, $\lambda_{21}$=8.110  
+
+# get the resulting survival information of sojourn time(Duration) and censoring of transition from 2 to 3
+```{r}
+library(flexsurv)
+library(survival)
+markov_chain <- dta[1:46220,]$value
+current_state <- markov_chain[1]
+current_state_duration <- 1
+result <- list()
+head <- 2
+tail <- 3
+for (i in 2:length(markov_chain)) {
+  if (markov_chain[i] == current_state) {
+    current_state_duration <- current_state_duration + 1
+  } else {
+    if(current_state == head & markov_chain[i] == tail){
+      result <- append(result, list(c(current_state, current_state_duration,1)))
+    }
+    else if(current_state == head & markov_chain[i] != tail){
+      result <- append(result, list(c(current_state, current_state_duration,0)))
+    }
+    current_state <- markov_chain[i]
+    current_state_duration <- 1
+  }
+}
+
+result_matrix <- matrix(unlist(result), ncol = 3, byrow = TRUE)
+duration = result_matrix[,2]
+event <- result_matrix[,3]
+```
+
+
+# calculate and plot the empirical hazard function and empirical cumulative hazard
+```{r}
+surv_obj <- Surv(duration, event)
+surv_fit <- survfit(surv_obj ~ 1)
+plot(surv_fit, xlab = "Time (epochs)", ylab = "Survival probability", main = "Estimated Survival Curve")
+
+hazard_fit <- survfit(surv_obj ~ 1, type = "fleming-harrington")
+summary(hazard_fit)
+hazard_data <- data.frame(time = hazard_fit$time, hazard = hazard_fit$cumhaz)
+
+plot(hazard_data$time, hazard_data$hazard, type = "l", xlab = "Time (epochs)", ylab = "Hazard", main = paste("Estimated Cummulative Hazard Curve", head,'to',tail))
+
+dta_sojourn <- as.data.frame(result_matrix[,2:3])
+time_point <- dta_sojourn %>% 
+  filter(V2 == 1) %>% 
+  select(V1) %>% 
+  unique()
+time_point <- sort(time_point$V1)
+time_point
+empirical_hazards <- rep(0, length(time_point))
+empirical_chazards <- rep(0, length(time_point))
+i <- 1
+for (t in time_point){
+  denominator <- dta_sojourn %>% 
+    filter(V1 >= t) %>% 
+    count()
+  numerator <- dta_sojourn %>% 
+    filter(V1 == t & V2 == 1) %>% 
+    count()
+  empirical_hazards[i] <- numerator/denominator
+  i <- i+1
+}
+empirical_hazards <-unlist(empirical_hazards)
+i <- 1
+for (value in empirical_hazards){
+  empirical_chazards[i] = sum(empirical_hazards[1:i])
+  i = i+1
+}
+
+plot(time_point, empirical_hazards, xlab = "Time (epochs)", ylab = "Hazard", main = paste("Empirical  Hazard Curve", head,'to',tail))
+
+plot(time_point, empirical_chazards, xlab = "Time (epochs)", ylab = "Hazard", main = paste("Empirical Cummulative Hazard", head,'to',tail))
+```
+
+# fit a Weibull distribution to the survival function
+```{r}
+library(survminer)
+dta_sojourn <- as.data.frame(result_matrix[,2:3])
+fitg <- flexsurvreg(formula = Surv(V1, V2) ~ 1, data = dta_sojourn, dist="weibull")
+fitg
+plot(fitg,xlab="Time(epochs)",ylab="survival probability",main="The Survival function from state 2 to state 3 fitted by a Weibull distribution")
+```
+$p_{23}$=1.3908, $\lambda_{23}$=8.0808 
+
+# get the resulting survival information of sojourn time(Duration) and censoring of transition from 2 to 4
+```{r}
+library(flexsurv)
+library(survival)
+markov_chain <- dta[1:46220,]$value
+current_state <- markov_chain[1]
+current_state_duration <- 1
+result <- list()
+head <- 2
+tail <- 4
+for (i in 2:length(markov_chain)) {
+  if (markov_chain[i] == current_state) {
+    current_state_duration <- current_state_duration + 1
+  } else {
+    if(current_state == head & markov_chain[i] == tail){
+      result <- append(result, list(c(current_state, current_state_duration,1)))
+    }
+    else if(current_state == head & markov_chain[i] != tail){
+      result <- append(result, list(c(current_state, current_state_duration,0)))
+    }
+    current_state <- markov_chain[i]
+    current_state_duration <- 1
+  }
+}
+
+result_matrix <- matrix(unlist(result), ncol = 3, byrow = TRUE)
+duration = result_matrix[,2]
+event <- result_matrix[,3]
+```
+
+
+# calculate and plot the empirical hazard function and empirical cumulative hazard
+```{r}
+surv_obj <- Surv(duration, event)
+surv_fit <- survfit(surv_obj ~ 1)
+plot(surv_fit, xlab = "Time (epochs)", ylab = "Survival probability", main = "Estimated Survival Curve")
+
+hazard_fit <- survfit(surv_obj ~ 1, type = "fleming-harrington")
+summary(hazard_fit)
+hazard_data <- data.frame(time = hazard_fit$time, hazard = hazard_fit$cumhaz)
+
+plot(hazard_data$time, hazard_data$hazard, type = "l", xlab = "Time (epochs)", ylab = "Hazard", main = paste("Estimated Cummulative Hazard Curve", head,'to',tail))
+
+dta_sojourn <- as.data.frame(result_matrix[,2:3])
+time_point <- dta_sojourn %>% 
+  filter(V2 == 1) %>% 
+  select(V1) %>% 
+  unique()
+time_point <- sort(time_point$V1)
+time_point
+empirical_hazards <- rep(0, length(time_point))
+empirical_chazards <- rep(0, length(time_point))
+i <- 1
+for (t in time_point){
+  denominator <- dta_sojourn %>% 
+    filter(V1 >= t) %>% 
+    count()
+  numerator <- dta_sojourn %>% 
+    filter(V1 == t & V2 == 1) %>% 
+    count()
+  empirical_hazards[i] <- numerator/denominator
+  i <- i+1
+}
+empirical_hazards <-unlist(empirical_hazards)
+i <- 1
+for (value in empirical_hazards){
+  empirical_chazards[i] = sum(empirical_hazards[1:i])
+  i = i+1
+}
+
+plot(time_point, empirical_hazards, xlab = "Time (epochs)", ylab = "Hazard", main = paste("Empirical  Hazard Curve", head,'to',tail))
+
+plot(time_point, empirical_chazards, xlab = "Time (epochs)", ylab = "Hazard", main = paste("Empirical Cummulative Hazard", head,'to',tail))
+```
+
+# fit a Weibull distribution to the survival function
+```{r}
+library(survminer)
+dta_sojourn <- as.data.frame(result_matrix[,2:3])
+fitg <- flexsurvreg(formula = Surv(V1, V2) ~ 1, data = dta_sojourn, dist="weibull")
+fitg
+plot(fitg)
+```
+$p_{24}$=1.1398 , $\lambda_{24}$=10.5527 
+
+# get the resulting survival information of sojourn time(Duration) and censoring of transition from 2 to 5
+```{r}
+library(flexsurv)
+library(survival)
+markov_chain <- dta[1:46220,]$value
+current_state <- markov_chain[1]
+current_state_duration <- 1
+result <- list()
+head <- 2
+tail <- 5
+for (i in 2:length(markov_chain)) {
+  if (markov_chain[i] == current_state) {
+    current_state_duration <- current_state_duration + 1
+  } else {
+    if(current_state == head & markov_chain[i] == tail){
+      result <- append(result, list(c(current_state, current_state_duration,1)))
+    }
+    else if(current_state == head & markov_chain[i] != tail){
+      result <- append(result, list(c(current_state, current_state_duration,0)))
+    }
+    current_state <- markov_chain[i]
+    current_state_duration <- 1
+  }
+}
+
+result_matrix <- matrix(unlist(result), ncol = 3, byrow = TRUE)
+duration = result_matrix[,2]
+event <- result_matrix[,3]
+```
+
+
+# calculate and plot the empirical hazard function and empirical cumulative hazard
+```{r}
+surv_obj <- Surv(duration, event)
+surv_fit <- survfit(surv_obj ~ 1)
+plot(surv_fit, xlab = "Time (epochs)", ylab = "Survival probability", main = "Estimated Survival Curve")
+
+hazard_fit <- survfit(surv_obj ~ 1, type = "fleming-harrington")
+summary(hazard_fit)
+hazard_data <- data.frame(time = hazard_fit$time, hazard = hazard_fit$cumhaz)
+
+plot(hazard_data$time, hazard_data$hazard, type = "l", xlab = "Time (epochs)", ylab = "Hazard", main = paste("Estimated Cummulative Hazard Curve", head,'to',tail))
+
+dta_sojourn <- as.data.frame(result_matrix[,2:3])
+time_point <- dta_sojourn %>% 
+  filter(V2 == 1) %>% 
+  select(V1) %>% 
+  unique()
+time_point <- sort(time_point$V1)
+time_point
+empirical_hazards <- rep(0, length(time_point))
+empirical_chazards <- rep(0, length(time_point))
+i <- 1
+for (t in time_point){
+  denominator <- dta_sojourn %>% 
+    filter(V1 >= t) %>% 
+    count()
+  numerator <- dta_sojourn %>% 
+    filter(V1 == t & V2 == 1) %>% 
+    count()
+  empirical_hazards[i] <- numerator/denominator
+  i <- i+1
+}
+empirical_hazards <-unlist(empirical_hazards)
+i <- 1
+for (value in empirical_hazards){
+  empirical_chazards[i] = sum(empirical_hazards[1:i])
+  i = i+1
+}
+
+plot(time_point, empirical_hazards, xlab = "Time (epochs)", ylab = "Hazard", main = paste("Empirical  Hazard Curve", head,'to',tail))
+
+plot(time_point, empirical_chazards, xlab = "Time (epochs)", ylab = "Hazard", main = paste("Empirical Cummulative Hazard", head,'to',tail))
+```
+
+# fit a Weibull distribution to the survival function
+```{r}
+library(survminer)
+dta_sojourn <- as.data.frame(result_matrix[,2:3])
+fitg <- flexsurvreg(formula = Surv(V1, V2) ~ 1, data = dta_sojourn, dist="weibull")
+fitg
+plot(fitg)
+```
+$p_{25}$=1.38, $\lambda_{25}$=121.32 
+
+# get the resulting survival information of sojourn time(Duration) and censoring of transition from 1 to 2
+```{r}
+library(flexsurv)
+library(survival)
+markov_chain <- dta[1:46220,]$value
+current_state <- markov_chain[1]
+current_state_duration <- 1
+result <- list()
+head <- 1
+tail <- 2
+for (i in 2:length(markov_chain)) {
+  if (markov_chain[i] == current_state) {
+    current_state_duration <- current_state_duration + 1
+  } else {
+    if(current_state == head & markov_chain[i] == tail){
+      result <- append(result, list(c(current_state, current_state_duration,1)))
+    }
+    else if(current_state == head & markov_chain[i] != tail){
+      result <- append(result, list(c(current_state, current_state_duration,0)))
+    }
+    current_state <- markov_chain[i]
+    current_state_duration <- 1
+  }
+}
+
+result_matrix <- matrix(unlist(result), ncol = 3, byrow = TRUE)
+duration = result_matrix[,2]
+event <- result_matrix[,3]
+new12sojourntime <- as.data.frame(result_matrix[,2:3])
+new12sojourntime<-new12sojourntime %>% filter(V2==1) %>% select(V1)
+max(new12sojourntime$V1)
+Mode <- function(x) {
+  ux <- unique(x)
+  ux[which.max(tabulate(match(x, ux)))]
+}
+Mode(new12sojourntime$V1)
+mean(new12sojourntime$V1)
+sort(unique(new12sojourntime$V1))
+hist(new12sojourntime$V1,freq=TRUE,breaks=22,right = FALSE)
+```
+
+# Use Bootstrap method on the original distribution of $\Tau$ conditioned on i and j to get the expected sojourn time here it is the conditional distribution of sojourn time from state 1 to state 2.
+```{r}
+set.seed(1) 
+
+B = 10000   # Number of bootstrap samples to draw
+store_mean = rep(0, B) # Vector to store B means
+
+# For loop to draw B bootstrap samples
+ for (n in 1:B){
+  # Random sample of nrow values
+  boot.id = sample(1:nrow(new12sojourntime), size = nrow(new12sojourntime), replace = TRUE) 
+  new12sojourntime.boot = new12sojourntime[boot.id,] 
+  # Store sample mean of the bootstrapped data in 
+  # row n of the store_mean vector.
+  store_mean[n] = mean(new12sojourntime.boot) 
+ } # End for loop
+
+# Create a histogram of B mean values: 
+hist(store_mean, breaks = 20, freq = FALSE, col = "black",
+     border ='white', 
+    main = 'Bootstrap Distribution of sojourn times from state 1 to state 2',
+     xlab = 'Mean sojourn time from state 1 to state 2')
+mean(store_mean)
+abline(v=mean(store_mean),col=crimson, lwd=3 )
+```
+
+
+
+
+
+# calculate and plot the empirical hazard function and empirical cumulative hazard
+```{r}
+surv_obj <- Surv(duration, event)
+surv_fit <- survfit(surv_obj ~ 1)
+plot(surv_fit, xlab = "Time (epochs)", ylab = "Survival probability", main = "Estimated Survival Curve")
+
+hazard_fit <- survfit(surv_obj ~ 1, type = "fleming-harrington")
+summary(hazard_fit)
+hazard_data <- data.frame(time = hazard_fit$time, hazard = hazard_fit$cumhaz)
+
+plot(hazard_data$time, hazard_data$hazard, type = "l", xlab = "Time (epochs)", ylab = "Hazard", main = paste("Estimated Cummulative Hazard Curve", head,'to',tail))
+
+dta_sojourn <- as.data.frame(result_matrix[,2:3])
+time_point <- dta_sojourn %>% 
+  filter(V2 == 1) %>% 
+  select(V1) %>% 
+  unique()
+time_point <- sort(time_point$V1)
+time_point
+empirical_hazards <- rep(0, length(time_point))
+empirical_chazards <- rep(0, length(time_point))
+i <- 1
+for (t in time_point){
+  denominator <- dta_sojourn %>% 
+    filter(V1 >= t) %>% 
+    count()
+  numerator <- dta_sojourn %>% 
+    filter(V1 == t & V2 == 1) %>% 
+    count()
+  empirical_hazards[i] <- numerator/denominator
+  i <- i+1
+}
+empirical_hazards <-unlist(empirical_hazards)
+i <- 1
+for (value in empirical_hazards){
+  empirical_chazards[i] = sum(empirical_hazards[1:i])
+  i = i+1
+}
+
+plot(time_point, empirical_hazards, xlab = "Time (epochs)", ylab = "Hazard", main = paste("Empirical  Hazard Curve", head,'to',tail))
+
+plot(time_point, empirical_chazards, xlab = "Time (epochs)", ylab = "Hazard", main = paste("Empirical Cummulative Hazard", head,'to',tail))
+```
+
+# fit a Weibull distribution to the survival function
+```{r}
+library(survminer)
+dta_sojourn <- as.data.frame(result_matrix[,2:3])
+fitg <- flexsurvreg(formula = Surv(V1, V2) ~ 1, data = dta_sojourn, dist="weibull")
+fitg
+plot(fitg,xlab="Time(epochs)",ylab="survival probability",main="The Survival function from state 1 to state 2 fitted by a Weibull distribution")
+```
+$p_{12}$= 1.2828 , $\lambda_{12}$=4.4729
+
+# get the resulting survival information of sojourn time(Duration) and censoring of transition from 1 to 3
+```{r}
+library(flexsurv)
+library(survival)
+markov_chain <- dta[1:46220,]$value
+current_state <- markov_chain[1]
+current_state_duration <- 1
+result <- list()
+head <- 1
+tail <- 3
+for (i in 2:length(markov_chain)) {
+  if (markov_chain[i] == current_state) {
+    current_state_duration <- current_state_duration + 1
+  } else {
+    if(current_state == head & markov_chain[i] == tail){
+      result <- append(result, list(c(current_state, current_state_duration,1)))
+    }
+    else if(current_state == head & markov_chain[i] != tail){
+      result <- append(result, list(c(current_state, current_state_duration,0)))
+    }
+    current_state <- markov_chain[i]
+    current_state_duration <- 1
+  }
+}
+
+result_matrix <- matrix(unlist(result), ncol = 3, byrow = TRUE)
+duration = result_matrix[,2]
+event <- result_matrix[,3]
+```
+
+
+# calculate and plot the empirical hazard function and empirical cumulative hazard
+```{r}
+surv_obj <- Surv(duration, event)
+surv_fit <- survfit(surv_obj ~ 1)
+plot(surv_fit, xlab = "Time (epochs)", ylab = "Survival probability", main = "Estimated Survival Curve")
+
+hazard_fit <- survfit(surv_obj ~ 1, type = "fleming-harrington")
+summary(hazard_fit)
+hazard_data <- data.frame(time = hazard_fit$time, hazard = hazard_fit$cumhaz)
+
+plot(hazard_data$time, hazard_data$hazard, type = "l", xlab = "Time (epochs)", ylab = "Hazard", main = paste("Estimated Cummulative Hazard Curve", head,'to',tail))
+
+dta_sojourn <- as.data.frame(result_matrix[,2:3])
+time_point <- dta_sojourn %>% 
+  filter(V2 == 1) %>% 
+  select(V1) %>% 
+  unique()
+time_point <- sort(time_point$V1)
+time_point
+empirical_hazards <- rep(0, length(time_point))
+empirical_chazards <- rep(0, length(time_point))
+i <- 1
+for (t in time_point){
+  denominator <- dta_sojourn %>% 
+    filter(V1 >= t) %>% 
+    count()
+  numerator <- dta_sojourn %>% 
+    filter(V1 == t & V2 == 1) %>% 
+    count()
+  empirical_hazards[i] <- numerator/denominator
+  i <- i+1
+}
+empirical_hazards <-unlist(empirical_hazards)
+i <- 1
+for (value in empirical_hazards){
+  empirical_chazards[i] = sum(empirical_hazards[1:i])
+  i = i+1
+}
+
+plot(time_point, empirical_hazards, xlab = "Time (epochs)", ylab = "Hazard", main = paste("Empirical  Hazard Curve", head,'to',tail))
+
+plot(time_point, empirical_chazards, xlab = "Time (epochs)", ylab = "Hazard", main = paste("Empirical Cummulative Hazard", head,'to',tail))
+```
+
+# fit a Weibull distribution to the survival function
+```{r}
+library(survminer)
+dta_sojourn <- as.data.frame(result_matrix[,2:3])
+fitg <- flexsurvreg(formula = Surv(V1, V2) ~ 1, data = dta_sojourn, dist="weibull")
+fitg
+plot(fitg)
+```
+$p_{13}$=1.5435, $\lambda_{13}$=12.3099
+
+# get the resulting survival information of sojourn time(Duration) and censoring of transition from 1 to 4
+```{r}
+library(flexsurv)
+library(survival)
+markov_chain <- dta[1:46220,]$value
+current_state <- markov_chain[1]
+current_state_duration <- 1
+result <- list()
+head <- 1
+tail <- 4
+for (i in 2:length(markov_chain)) {
+  if (markov_chain[i] == current_state) {
+    current_state_duration <- current_state_duration + 1
+  } else {
+    if(current_state == head & markov_chain[i] == tail){
+      result <- append(result, list(c(current_state, current_state_duration,1)))
+    }
+    else if(current_state == head & markov_chain[i] != tail){
+      result <- append(result, list(c(current_state, current_state_duration,0)))
+    }
+    current_state <- markov_chain[i]
+    current_state_duration <- 1
+  }
+}
+
+result_matrix <- matrix(unlist(result), ncol = 3, byrow = TRUE)
+duration = result_matrix[,2]
+event <- result_matrix[,3]
+```
+
+
+# calculate and plot the empirical hazard function and empirical cumulative hazard
+```{r}
+surv_obj <- Surv(duration, event)
+surv_fit <- survfit(surv_obj ~ 1)
+plot(surv_fit, xlab = "Time (epochs)", ylab = "Survival probability", main = "Estimated Survival Curve")
+
+hazard_fit <- survfit(surv_obj ~ 1, type = "fleming-harrington")
+summary(hazard_fit)
+hazard_data <- data.frame(time = hazard_fit$time, hazard = hazard_fit$cumhaz)
+
+plot(hazard_data$time, hazard_data$hazard, type = "l", xlab = "Time (epochs)", ylab = "Hazard", main = paste("Estimated Cummulative Hazard Curve", head,'to',tail))
+
+dta_sojourn <- as.data.frame(result_matrix[,2:3])
+time_point <- dta_sojourn %>% 
+  filter(V2 == 1) %>% 
+  select(V1) %>% 
+  unique()
+time_point <- sort(time_point$V1)
+time_point
+empirical_hazards <- rep(0, length(time_point))
+empirical_chazards <- rep(0, length(time_point))
+i <- 1
+for (t in time_point){
+  denominator <- dta_sojourn %>% 
+    filter(V1 >= t) %>% 
+    count()
+  numerator <- dta_sojourn %>% 
+    filter(V1 == t & V2 == 1) %>% 
+    count()
+  empirical_hazards[i] <- numerator/denominator
+  i <- i+1
+}
+empirical_hazards <-unlist(empirical_hazards)
+i <- 1
+for (value in empirical_hazards){
+  empirical_chazards[i] = sum(empirical_hazards[1:i])
+  i = i+1
+}
+
+plot(time_point, empirical_hazards, xlab = "Time (epochs)", ylab = "Hazard", main = paste("Empirical  Hazard Curve", head,'to',tail))
+
+plot(time_point, empirical_chazards, xlab = "Time (epochs)", ylab = "Hazard", main = paste("Empirical Cummulative Hazard", head,'to',tail))
+```
+# fit a Weibull distribution to the survival function
+```{r}
+library(survminer)
+dta_sojourn <- as.data.frame(result_matrix[,2:3])
+fitg <- flexsurvreg(formula = Surv(V1, V2) ~ 1, data = dta_sojourn, dist="weibull")
+fitg
+plot(fitg)
+
+```
+$p_{14}$= 1.1874, $\lambda_{14}$=19.0447 
+
+# get the resulting survival information of sojourn time(Duration) and censoring of transition from 1 to 5
+It turns out that there's no transition for the 21th pregnant woman to terminate her sleep directly from stage 1.
+
+
+

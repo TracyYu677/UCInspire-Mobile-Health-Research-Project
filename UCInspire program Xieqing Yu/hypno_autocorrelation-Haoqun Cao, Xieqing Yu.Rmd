@@ -1,0 +1,972 @@
+---
+title: "autocorrelation Analysis"
+author: "Xieqing Yu Haoqun Cao"
+date: "`r Sys.Date()`"
+output: rmdformats::readthedown
+  
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(knitr)
+# library(rmdformats)
+library(kableExtra)
+library(dplyr)
+library(tseries)
+library(lubridate)
+library(tibble)
+library(ggplot2)
+library(hms)
+## Global options
+options(max.print="60")
+opts_knit$set(width=75)
+```
+
+```{r}
+theme_ours_slanted <- function (base_size = 11, base_family = "") {
+    theme(
+      plot.title = element_text(color = "black", size = 16, hjust = 0.5, face = "bold"),
+      axis.title = element_text(color = "black", size = 12, hjust = 0.5),
+      panel.grid.major.x  = element_blank(),
+      panel.grid.major.y  = element_line(color = "white"),
+      panel.grid.minor  = element_blank(),
+      panel.background = element_rect(fill = "#E1F0FC"),
+      panel.border = element_rect(color = "steelblue4", fill = NA),
+      axis.line = element_line(color = "steelblue4"),
+      axis.ticks = element_line(color = "steelblue4"),
+      axis.text = element_text(color = "black"),
+      axis.text.x = element_text(angle = 90, hjust = 1)
+      )
+}
+```
+
+
+## plot the hypnogram to find sleep cycle
+```{r}
+dta <- read.csv("~/Desktop/UCInspire program summer 2023/5-min sleep new/unitef21 hypno.csv")
+```
+
+```{r}
+dta$date<-as.Date(dta$time)
+dta$daytime<-format(dta$time,format="%H:%M:%S")
+dta$daytime<- format(as.POSIXct(dta$time),format="%H:%M:%S")
+```
+
+```{r}
+for(i in 1:(nrow(dta)-1)){
+  if(dta[i,]$date != dta[i+1,]$date){
+    dta[i,]$value = 5
+  }
+}
+dta[nrow(dta),]$value=5
+
+```
+
+
+```{r}
+daydta <- dta %>% 
+  filter(date == '2021-04-09')
+daydta %>% ggplot(aes(x = daytime, y = value))+labs(x="Daytime",y="Sleeping Stage")+geom_point()+theme_ours_slanted()+ggtitle("hypnogram of unitef21 in 2021-04-09")
+
+```
+
+2 light 1 deep 3 REM 4 awake
+
+2->1
+2->3
+2->4
+
+3->1
+3->2
+3->4
+
+1->2
+1->3
+1->4
+
+4->1
+4->2
+4->3
+4->5
+
+
+
+## check the transition time for the same group(2->1) in one day 
+````{r}
+markov_chain <- daydta$value
+current_state <- markov_chain[1]
+current_state_duration <- 1
+result <- list()
+length(result)
+head <- 2
+tail <- 1
+
+
+for (i in 2:length(markov_chain)) {
+  if (markov_chain[i] == current_state) {
+    current_state_duration <- current_state_duration + 1
+  } else {
+    # if(T){
+    if(current_state == head & markov_chain[i] == tail){
+      result <- append(result, list(c(current_state, current_state_duration)))
+    }
+    current_state <- markov_chain[i]
+    current_state_duration <- 1
+  }
+}
+
+# result <- append(result, list(c(current_state, current_state_duration)))
+if(length(result)==0){
+  result<-list(head,0)
+}
+result_matrix <- matrix(unlist(result), ncol = 2, byrow = TRUE)
+duration = result_matrix[,2] #vector
+sum=0
+for(i in 1:length(duration)){
+  sum=sum+duration[i]
+}
+sum
+```
+## get the list of observed dates and convert it to a dataframe
+```{r}
+datelist<-list()
+dta$datechar<-as.character(dta$date)
+for(i in 1:(nrow(dta)-1)){
+  if(dta[i,]$date != dta[i+1,]$date){
+    datelist <- append(datelist,dta[i,]$datechar)
+  }
+}
+datelist<-append(datelist,dta[nrow(dta),]$datechar)
+autocorr <- data.frame(matrix(unlist(datelist), nrow=length(datelist), byrow=TRUE))
+colnames(autocorr)<-"datefor21"
+```
+
+## get all the sums of transition time from 2 to 1 for different dates for the number 21 pregnant woman and form into the second column of autocorr
+````{r}
+transtime21of21<-list()
+for(i in 1:nrow(autocorr)){
+  dateval<-autocorr[i,1]
+  daydta <- dta %>% 
+    filter(date == dateval)
+  markov_chain <- daydta$value
+  current_state <- markov_chain[1]
+  current_state_duration <- 1
+  result <- list()
+  head <- 2
+  tail <- 1
+  for (j in 2:length(markov_chain)) {
+    if (markov_chain[j] == current_state) {
+     current_state_duration <- current_state_duration + 1
+    } else {
+    # if(T){
+    if(current_state == head & markov_chain[j] == tail){
+      result <- append(result, list(c(current_state, current_state_duration)))
+    }
+    current_state <- markov_chain[j]
+    current_state_duration <- 1
+  }
+  }
+  if(length(result)==0){
+  result<-list(head,0)
+  }
+  result_matrix <- matrix(unlist(result), ncol = 2,byrow=TRUE)
+  duration = result_matrix[,2] #vector
+  sum=0
+  for(k in 1:length(duration)){
+  sum=sum+duration[k]
+  }
+  transtime21of21<-append(transtime21of21,sum)
+}
+autocorr$transtime21for21<-matrix(unlist(transtime21of21))
+autocorr<-autocorr[1:486,]
+autocorr_ts<-ts(autocorr$transtime21for21)
+plot(autocorr_ts)
+acf(autocorr_ts)
+pacf(autocorr_ts)
+```
+## get the list of observed dates and convert it to a dataframe
+```{r}
+datelist<-list()
+dta$datechar<-as.character(dta$date)
+for(i in 1:(nrow(dta)-1)){
+  if(dta[i,]$date != dta[i+1,]$date){
+    datelist <- append(datelist,dta[i,]$datechar)
+  }
+}
+datelist<-append(datelist,dta[nrow(dta),]$datechar)
+autocorr <- data.frame(matrix(unlist(datelist), nrow=length(datelist), byrow=TRUE))
+colnames(autocorr)<-"datefor21"
+```
+
+## get all the sums of transition time from 2 to 3 for different dates for the number 21 pregnant woman and form into the second column of autocorr
+````{r}
+transtime21of21<-list()
+for(i in 1:nrow(autocorr)){
+  dateval<-autocorr[i,1]
+  daydta <- dta %>% 
+    filter(date == dateval)
+  markov_chain <- daydta$value
+  current_state <- markov_chain[1]
+  current_state_duration <- 1
+  result <- list()
+  head <- 2
+  tail <- 3
+  for (j in 2:length(markov_chain)) {
+    if (markov_chain[j] == current_state) {
+     current_state_duration <- current_state_duration + 1
+    } else {
+    # if(T){
+    if(current_state == head & markov_chain[j] == tail){
+      result <- append(result, list(c(current_state, current_state_duration)))
+    }
+    current_state <- markov_chain[j]
+    current_state_duration <- 1
+  }
+  }
+  if(length(result)==0){
+  result<-list(head,0)
+  }
+  result_matrix <- matrix(unlist(result), ncol = 2,byrow=TRUE)
+  duration = result_matrix[,2] #vector
+  sum=0
+  for(k in 1:length(duration)){
+  sum=sum+duration[k]
+  }
+  transtime21of21<-append(transtime21of21,sum)
+}
+autocorr$transtime21for21<-matrix(unlist(transtime21of21))
+autocorr<-autocorr[1:486,]
+autocorr_ts<-ts(autocorr$transtime21for21)
+plot(autocorr_ts)
+acf(autocorr_ts)
+```
+## get the list of observed dates and convert it to a dataframe
+```{r}
+datelist<-list()
+dta$datechar<-as.character(dta$date)
+for(i in 1:(nrow(dta)-1)){
+  if(dta[i,]$date != dta[i+1,]$date){
+    datelist <- append(datelist,dta[i,]$datechar)
+  }
+}
+datelist<-append(datelist,dta[nrow(dta),]$datechar)
+autocorr <- data.frame(matrix(unlist(datelist), nrow=length(datelist), byrow=TRUE))
+colnames(autocorr)<-"datefor21"
+```
+
+## get all the sums of transition time from 2 to 4 for different dates for the number 21 pregnant woman and form into the second column of autocorr
+````{r}
+transtime21of21<-list()
+for(i in 1:nrow(autocorr)){
+  dateval<-autocorr[i,1]
+  daydta <- dta %>% 
+    filter(date == dateval)
+  markov_chain <- daydta$value
+  current_state <- markov_chain[1]
+  current_state_duration <- 1
+  result <- list()
+  head <- 2
+  tail <- 4
+  for (j in 2:length(markov_chain)) {
+    if (markov_chain[j] == current_state) {
+     current_state_duration <- current_state_duration + 1
+    } else {
+    # if(T){
+    if(current_state == head & markov_chain[j] == tail){
+      result <- append(result, list(c(current_state, current_state_duration)))
+    }
+    current_state <- markov_chain[j]
+    current_state_duration <- 1
+  }
+  }
+  if(length(result)==0){
+  result<-list(head,0)
+  }
+  result_matrix <- matrix(unlist(result), ncol = 2,byrow=TRUE)
+  duration = result_matrix[,2] #vector
+  sum=0
+  for(k in 1:length(duration)){
+  sum=sum+duration[k]
+  }
+  transtime21of21<-append(transtime21of21,sum)
+}
+autocorr$transtime21for21<-matrix(unlist(transtime21of21))
+autocorr<-autocorr[1:486,]
+autocorr_ts<-ts(autocorr$transtime21for21)
+plot(autocorr_ts)
+acf(autocorr_ts)
+```
+## get the list of observed dates and convert it to a dataframe
+```{r}
+datelist<-list()
+dta$datechar<-as.character(dta$date)
+for(i in 1:(nrow(dta)-1)){
+  if(dta[i,]$date != dta[i+1,]$date){
+    datelist <- append(datelist,dta[i,]$datechar)
+  }
+}
+datelist<-append(datelist,dta[nrow(dta),]$datechar)
+autocorr <- data.frame(matrix(unlist(datelist), nrow=length(datelist), byrow=TRUE))
+colnames(autocorr)<-"datefor21"
+```
+
+## get all the sums of transition time from 3 to 1 for different dates for the number 21 pregnant woman and form into the second column of autocorr
+````{r}
+transtime21of21<-list()
+for(i in 1:nrow(autocorr)){
+  dateval<-autocorr[i,1]
+  daydta <- dta %>% 
+    filter(date == dateval)
+  markov_chain <- daydta$value
+  current_state <- markov_chain[1]
+  current_state_duration <- 1
+  result <- list()
+  head <- 3
+  tail <- 1
+  for (j in 2:length(markov_chain)) {
+    if (markov_chain[j] == current_state) {
+     current_state_duration <- current_state_duration + 1
+    } else {
+    # if(T){
+    if(current_state == head & markov_chain[j] == tail){
+      result <- append(result, list(c(current_state, current_state_duration)))
+    }
+    current_state <- markov_chain[j]
+    current_state_duration <- 1
+  }
+  }
+  if(length(result)==0){
+  result<-list(head,0)
+  }
+  result_matrix <- matrix(unlist(result), ncol = 2,byrow=TRUE)
+  duration = result_matrix[,2] #vector
+  sum=0
+  for(k in 1:length(duration)){
+  sum=sum+duration[k]
+  }
+  transtime21of21<-append(transtime21of21,sum)
+}
+autocorr$transtime21for21<-matrix(unlist(transtime21of21))
+autocorr<-autocorr[1:486,]
+autocorr_ts<-ts(autocorr$transtime21for21)
+plot(autocorr_ts)
+acf(autocorr_ts)
+```
+
+## get the list of observed dates and convert it to a dataframe
+```{r}
+datelist<-list()
+dta$datechar<-as.character(dta$date)
+for(i in 1:(nrow(dta)-1)){
+  if(dta[i,]$date != dta[i+1,]$date){
+    datelist <- append(datelist,dta[i,]$datechar)
+  }
+}
+datelist<-append(datelist,dta[nrow(dta),]$datechar)
+autocorr <- data.frame(matrix(unlist(datelist), nrow=length(datelist), byrow=TRUE))
+colnames(autocorr)<-"datefor21"
+```
+
+## get all the sums of transition time from 3 to 2 for different dates for the number 21 pregnant woman and form into the second column of autocorr
+````{r}
+transtime21of21<-list()
+for(i in 1:nrow(autocorr)){
+  dateval<-autocorr[i,1]
+  daydta <- dta %>% 
+    filter(date == dateval)
+  markov_chain <- daydta$value
+  current_state <- markov_chain[1]
+  current_state_duration <- 1
+  result <- list()
+  head <- 3
+  tail <- 2
+  for (j in 2:length(markov_chain)) {
+    if (markov_chain[j] == current_state) {
+     current_state_duration <- current_state_duration + 1
+    } else {
+    # if(T){
+    if(current_state == head & markov_chain[j] == tail){
+      result <- append(result, list(c(current_state, current_state_duration)))
+    }
+    current_state <- markov_chain[j]
+    current_state_duration <- 1
+  }
+  }
+  if(length(result)==0){
+  result<-list(head,0)
+  }
+  result_matrix <- matrix(unlist(result), ncol = 2,byrow=TRUE)
+  duration = result_matrix[,2] #vector
+  sum=0
+  for(k in 1:length(duration)){
+  sum=sum+duration[k]
+  }
+  transtime21of21<-append(transtime21of21,sum)
+}
+autocorr$transtime21for21<-matrix(unlist(transtime21of21))
+autocorr<-autocorr[1:486,]
+autocorr_ts<-ts(autocorr$transtime21for21)
+plot(autocorr_ts)
+acf(autocorr_ts)
+```
+
+## get the list of observed dates and convert it to a dataframe
+```{r}
+datelist<-list()
+dta$datechar<-as.character(dta$date)
+for(i in 1:(nrow(dta)-1)){
+  if(dta[i,]$date != dta[i+1,]$date){
+    datelist <- append(datelist,dta[i,]$datechar)
+  }
+}
+datelist<-append(datelist,dta[nrow(dta),]$datechar)
+autocorr <- data.frame(matrix(unlist(datelist), nrow=length(datelist), byrow=TRUE))
+colnames(autocorr)<-"datefor21"
+```
+
+## get all the sums of transition time from 3 to 4 for different dates for the number 21 pregnant woman and form into the second column of autocorr
+````{r}
+transtime21of21<-list()
+for(i in 1:nrow(autocorr)){
+  dateval<-autocorr[i,1]
+  daydta <- dta %>% 
+    filter(date == dateval)
+  markov_chain <- daydta$value
+  current_state <- markov_chain[1]
+  current_state_duration <- 1
+  result <- list()
+  head <- 3
+  tail <- 4
+  for (j in 2:length(markov_chain)) {
+    if (markov_chain[j] == current_state) {
+     current_state_duration <- current_state_duration + 1
+    } else {
+    # if(T){
+    if(current_state == head & markov_chain[j] == tail){
+      result <- append(result, list(c(current_state, current_state_duration)))
+    }
+    current_state <- markov_chain[j]
+    current_state_duration <- 1
+  }
+  }
+  if(length(result)==0){
+  result<-list(head,0)
+  }
+  result_matrix <- matrix(unlist(result), ncol = 2,byrow=TRUE)
+  duration = result_matrix[,2] #vector
+  sum=0
+  for(k in 1:length(duration)){
+  sum=sum+duration[k]
+  }
+  transtime21of21<-append(transtime21of21,sum)
+}
+autocorr$transtime21for21<-matrix(unlist(transtime21of21))
+autocorr<-autocorr[1:486,]
+autocorr_ts<-ts(autocorr$transtime21for21)
+plot(autocorr_ts)
+acf(autocorr_ts)
+```
+
+## get the list of observed dates and convert it to a dataframe
+```{r}
+datelist<-list()
+dta$datechar<-as.character(dta$date)
+for(i in 1:(nrow(dta)-1)){
+  if(dta[i,]$date != dta[i+1,]$date){
+    datelist <- append(datelist,dta[i,]$datechar)
+  }
+}
+datelist<-append(datelist,dta[nrow(dta),]$datechar)
+autocorr <- data.frame(matrix(unlist(datelist), nrow=length(datelist), byrow=TRUE))
+colnames(autocorr)<-"datefor21"
+```
+
+## get all the sums of transition time from 1 to 2 for different dates for the number 21 pregnant woman and form into the second column of autocorr
+````{r}
+transtime21of21<-list()
+for(i in 1:nrow(autocorr)){
+  dateval<-autocorr[i,1]
+  daydta <- dta %>% 
+    filter(date == dateval)
+  markov_chain <- daydta$value
+  current_state <- markov_chain[1]
+  current_state_duration <- 1
+  result <- list()
+  head <- 1
+  tail <- 2
+  for (j in 2:length(markov_chain)) {
+    if (markov_chain[j] == current_state) {
+     current_state_duration <- current_state_duration + 1
+    } else {
+    # if(T){
+    if(current_state == head & markov_chain[j] == tail){
+      result <- append(result, list(c(current_state, current_state_duration)))
+    }
+    current_state <- markov_chain[j]
+    current_state_duration <- 1
+  }
+  }
+  if(length(result)==0){
+  result<-list(head,0)
+  }
+  result_matrix <- matrix(unlist(result), ncol = 2,byrow=TRUE)
+  duration = result_matrix[,2] #vector
+  sum=0
+  for(k in 1:length(duration)){
+  sum=sum+duration[k]
+  }
+  transtime21of21<-append(transtime21of21,sum)
+}
+autocorr$transtime21for21<-matrix(unlist(transtime21of21))
+autocorr<-autocorr[1:486,]
+autocorr_ts<-ts(autocorr$transtime21for21)
+plot(autocorr_ts)
+acf(autocorr_ts)
+```
+
+## get the list of observed dates and convert it to a dataframe
+```{r}
+datelist<-list()
+dta$datechar<-as.character(dta$date)
+for(i in 1:(nrow(dta)-1)){
+  if(dta[i,]$date != dta[i+1,]$date){
+    datelist <- append(datelist,dta[i,]$datechar)
+  }
+}
+datelist<-append(datelist,dta[nrow(dta),]$datechar)
+autocorr <- data.frame(matrix(unlist(datelist), nrow=length(datelist), byrow=TRUE))
+colnames(autocorr)<-"datefor21"
+```
+
+## get all the sums of transition time from 1 to 3 for different dates for the number 21 pregnant woman and form into the second column of autocorr
+````{r}
+transtime21of21<-list()
+for(i in 1:nrow(autocorr)){
+  dateval<-autocorr[i,1]
+  daydta <- dta %>% 
+    filter(date == dateval)
+  markov_chain <- daydta$value
+  current_state <- markov_chain[1]
+  current_state_duration <- 1
+  result <- list()
+  head <- 1
+  tail <- 3
+  for (j in 2:length(markov_chain)) {
+    if (markov_chain[j] == current_state) {
+     current_state_duration <- current_state_duration + 1
+    } else {
+    # if(T){
+    if(current_state == head & markov_chain[j] == tail){
+      result <- append(result, list(c(current_state, current_state_duration)))
+    }
+    current_state <- markov_chain[j]
+    current_state_duration <- 1
+  }
+  }
+  if(length(result)==0){
+  result<-list(head,0)
+  }
+  result_matrix <- matrix(unlist(result), ncol = 2,byrow=TRUE)
+  duration = result_matrix[,2] #vector
+  sum=0
+  for(k in 1:length(duration)){
+  sum=sum+duration[k]
+  }
+  transtime21of21<-append(transtime21of21,sum)
+}
+autocorr$transtime21for21<-matrix(unlist(transtime21of21))
+autocorr<-autocorr[1:486,]
+autocorr_ts<-ts(autocorr$transtime21for21)
+plot(autocorr_ts)
+acf(autocorr_ts)
+```
+
+## get the list of observed dates and convert it to a dataframe
+```{r}
+datelist<-list()
+dta$datechar<-as.character(dta$date)
+for(i in 1:(nrow(dta)-1)){
+  if(dta[i,]$date != dta[i+1,]$date){
+    datelist <- append(datelist,dta[i,]$datechar)
+  }
+}
+datelist<-append(datelist,dta[nrow(dta),]$datechar)
+autocorr <- data.frame(matrix(unlist(datelist), nrow=length(datelist), byrow=TRUE))
+colnames(autocorr)<-"datefor21"
+```
+
+## get all the sums of transition time from 1 to 4 for different dates for the number 21 pregnant woman and form into the second column of autocorr
+````{r}
+transtime21of21<-list()
+for(i in 1:nrow(autocorr)){
+  dateval<-autocorr[i,1]
+  daydta <- dta %>% 
+    filter(date == dateval)
+  markov_chain <- daydta$value
+  current_state <- markov_chain[1]
+  current_state_duration <- 1
+  result <- list()
+  head <- 1
+  tail <- 4
+  for (j in 2:length(markov_chain)) {
+    if (markov_chain[j] == current_state) {
+     current_state_duration <- current_state_duration + 1
+    } else {
+    # if(T){
+    if(current_state == head & markov_chain[j] == tail){
+      result <- append(result, list(c(current_state, current_state_duration)))
+    }
+    current_state <- markov_chain[j]
+    current_state_duration <- 1
+  }
+  }
+  if(length(result)==0){
+  result<-list(head,0)
+  }
+  result_matrix <- matrix(unlist(result), ncol = 2,byrow=TRUE)
+  duration = result_matrix[,2] #vector
+  sum=0
+  for(k in 1:length(duration)){
+  sum=sum+duration[k]
+  }
+  transtime21of21<-append(transtime21of21,sum)
+}
+autocorr$transtime21for21<-matrix(unlist(transtime21of21))
+autocorr<-autocorr[1:486,]
+autocorr_ts<-ts(autocorr$transtime21for21)
+plot(autocorr_ts)
+acf(autocorr_ts)
+```
+
+
+## get the list of observed dates and convert it to a dataframe
+```{r}
+datelist<-list()
+dta$datechar<-as.character(dta$date)
+for(i in 1:(nrow(dta)-1)){
+  if(dta[i,]$date != dta[i+1,]$date){
+    datelist <- append(datelist,dta[i,]$datechar)
+  }
+}
+datelist<-append(datelist,dta[nrow(dta),]$datechar)
+autocorr <- data.frame(matrix(unlist(datelist), nrow=length(datelist), byrow=TRUE))
+colnames(autocorr)<-"datefor21"
+```
+
+## get all the sums of transition time from 4 to 1 for different dates for the number 21 pregnant woman and form into the second column of autocorr
+````{r}
+transtime21of21<-list()
+for(i in 1:nrow(autocorr)){
+  dateval<-autocorr[i,1]
+  daydta <- dta %>% 
+    filter(date == dateval)
+  markov_chain <- daydta$value
+  current_state <- markov_chain[1]
+  current_state_duration <- 1
+  result <- list()
+  head <- 4
+  tail <- 1
+  for (j in 2:length(markov_chain)) {
+    if (markov_chain[j] == current_state) {
+     current_state_duration <- current_state_duration + 1
+    } else {
+    # if(T){
+    if(current_state == head & markov_chain[j] == tail){
+      result <- append(result, list(c(current_state, current_state_duration)))
+    }
+    current_state <- markov_chain[j]
+    current_state_duration <- 1
+  }
+  }
+  if(length(result)==0){
+  result<-list(head,0)
+  }
+  result_matrix <- matrix(unlist(result), ncol = 2,byrow=TRUE)
+  duration = result_matrix[,2] #vector
+  sum=0
+  for(k in 1:length(duration)){
+  sum=sum+duration[k]
+  }
+  transtime21of21<-append(transtime21of21,sum)
+}
+autocorr$transtime21for21<-matrix(unlist(transtime21of21))
+autocorr<-autocorr[1:486,]
+autocorr_ts<-ts(autocorr$transtime21for21)
+plot(autocorr_ts)
+acf(autocorr_ts)
+```
+
+## get the list of observed dates and convert it to a dataframe
+```{r}
+datelist<-list()
+dta$datechar<-as.character(dta$date)
+for(i in 1:(nrow(dta)-1)){
+  if(dta[i,]$date != dta[i+1,]$date){
+    datelist <- append(datelist,dta[i,]$datechar)
+  }
+}
+datelist<-append(datelist,dta[nrow(dta),]$datechar)
+autocorr <- data.frame(matrix(unlist(datelist), nrow=length(datelist), byrow=TRUE))
+colnames(autocorr)<-"datefor21"
+```
+
+## get all the sums of transition time from 4 to 2 for different dates for the number 21 pregnant woman and form into the second column of autocorr
+````{r}
+transtime21of21<-list()
+for(i in 1:nrow(autocorr)){
+  dateval<-autocorr[i,1]
+  daydta <- dta %>% 
+    filter(date == dateval)
+  markov_chain <- daydta$value
+  current_state <- markov_chain[1]
+  current_state_duration <- 1
+  result <- list()
+  head <- 4
+  tail <- 2
+  for (j in 2:length(markov_chain)) {
+    if (markov_chain[j] == current_state) {
+     current_state_duration <- current_state_duration + 1
+    } else {
+    # if(T){
+    if(current_state == head & markov_chain[j] == tail){
+      result <- append(result, list(c(current_state, current_state_duration)))
+    }
+    current_state <- markov_chain[j]
+    current_state_duration <- 1
+  }
+  }
+  if(length(result)==0){
+  result<-list(head,0)
+  }
+  result_matrix <- matrix(unlist(result), ncol = 2,byrow=TRUE)
+  duration = result_matrix[,2] #vector
+  sum=0
+  for(k in 1:length(duration)){
+  sum=sum+duration[k]
+  }
+  transtime21of21<-append(transtime21of21,sum)
+}
+autocorr$transtime21for21<-matrix(unlist(transtime21of21))
+autocorr<-autocorr[1:486,]
+autocorr_ts<-ts(autocorr$transtime21for21)
+plot(autocorr_ts)
+acf(autocorr_ts)
+```
+
+## get the list of observed dates and convert it to a dataframe
+```{r}
+datelist<-list()
+dta$datechar<-as.character(dta$date)
+for(i in 1:(nrow(dta)-1)){
+  if(dta[i,]$date != dta[i+1,]$date){
+    datelist <- append(datelist,dta[i,]$datechar)
+  }
+}
+datelist<-append(datelist,dta[nrow(dta),]$datechar)
+autocorr <- data.frame(matrix(unlist(datelist), nrow=length(datelist), byrow=TRUE))
+colnames(autocorr)<-"datefor21"
+```
+
+## get all the sums of transition time from 4 to 3 for different dates for the number 21 pregnant woman and form into the second column of autocorr
+````{r}
+transtime21of21<-list()
+for(i in 1:nrow(autocorr)){
+  dateval<-autocorr[i,1]
+  daydta <- dta %>% 
+    filter(date == dateval)
+  markov_chain <- daydta$value
+  current_state <- markov_chain[1]
+  current_state_duration <- 1
+  result <- list()
+  head <- 4
+  tail <- 3
+  for (j in 2:length(markov_chain)) {
+    if (markov_chain[j] == current_state) {
+     current_state_duration <- current_state_duration + 1
+    } else {
+    # if(T){
+    if(current_state == head & markov_chain[j] == tail){
+      result <- append(result, list(c(current_state, current_state_duration)))
+    }
+    current_state <- markov_chain[j]
+    current_state_duration <- 1
+  }
+  }
+  if(length(result)==0){
+  result<-list(head,0)
+  }
+  result_matrix <- matrix(unlist(result), ncol = 2,byrow=TRUE)
+  duration = result_matrix[,2] #vector
+  sum=0
+  for(k in 1:length(duration)){
+  sum=sum+duration[k]
+  }
+  transtime21of21<-append(transtime21of21,sum)
+}
+autocorr$transtime21for21<-matrix(unlist(transtime21of21))
+autocorr<-autocorr[1:486,]
+autocorr_ts<-ts(autocorr$transtime21for21)
+plot(autocorr_ts)
+acf(autocorr_ts)
+```
+
+## get the list of observed dates and convert it to a dataframe
+```{r}
+datelist<-list()
+dta$datechar<-as.character(dta$date)
+for(i in 1:(nrow(dta)-1)){
+  if(dta[i,]$date != dta[i+1,]$date){
+    datelist <- append(datelist,dta[i,]$datechar)
+  }
+}
+datelist<-append(datelist,dta[nrow(dta),]$datechar)
+autocorr <- data.frame(matrix(unlist(datelist), nrow=length(datelist), byrow=TRUE))
+colnames(autocorr)<-"datefor21"
+```
+
+## get all the sums of transition time from 4 to 5 for different dates for the number 21 pregnant woman and form into the second column of autocorr
+````{r}
+transtime21of21<-list()
+for(i in 1:nrow(autocorr)){
+  dateval<-autocorr[i,1]
+  daydta <- dta %>% 
+    filter(date == dateval)
+  markov_chain <- daydta$value
+  current_state <- markov_chain[1]
+  current_state_duration <- 1
+  result <- list()
+  head <- 4
+  tail <- 5
+  for (j in 2:length(markov_chain)) {
+    if (markov_chain[j] == current_state) {
+     current_state_duration <- current_state_duration + 1
+    } else {
+    # if(T){
+    if(current_state == head & markov_chain[j] == tail){
+      result <- append(result, list(c(current_state, current_state_duration)))
+    }
+    current_state <- markov_chain[j]
+    current_state_duration <- 1
+  }
+  }
+  if(length(result)==0){
+  result<-list(head,0)
+  }
+  result_matrix <- matrix(unlist(result), ncol = 2,byrow=TRUE)
+  duration = result_matrix[,2] #vector
+  sum=0
+  for(k in 1:length(duration)){
+  sum=sum+duration[k]
+  }
+  transtime21of21<-append(transtime21of21,sum)
+}
+autocorr$transtime21for21<-matrix(unlist(transtime21of21))
+autocorr<-autocorr[1:486,]
+autocorr_ts<-ts(autocorr$transtime21for21)
+plot(autocorr_ts)
+acf(autocorr_ts)
+```
+
+## get all the duration of sleep for the number 21 pregnant woman and form into the third column of autocorr
+```{r}
+sleepduration21<-list()
+for(i in 1:nrow(autocorr)){
+  dateval<-autocorr[i,1]
+  daydta <- dta %>% 
+    filter(date == dateval)
+  sleepduration21<-append(sleepduration21,nrow(daydta))
+}
+autocorr$daysleepdurationfor21<-matrix(unlist(sleepduration21))
+autocorr_ts<-ts(autocorr$daysleepdurationfor21)
+plot(autocorr_ts)
+acf(autocorr_ts)
+pacf(autocorr_ts)
+```
+
+## get all the REM duration for the number 21 pregnant woman and form into the fourth column of autocorr
+```{r}
+REMduration21<-list()
+for(i in 1:nrow(autocorr)){
+  dateval<-autocorr[i,1]
+  daydta <- dta %>% 
+    filter(date == dateval)
+  count=0
+  for(j in 1:nrow(daydta)){
+    if(daydta[j,]$value==3){
+      count=count+1
+    }
+  }
+  REMduration21<-append(REMduration21,count)
+}
+autocorr$dayREMduration21<-matrix(unlist(REMduration21))
+autocorr_ts<-ts(autocorr$dayREMduration21)
+plot(autocorr_ts)
+acf(autocorr_ts)
+pacf(autocorr_ts)
+```
+
+## get all the deep duration for the number 21 pregnant woman and form into the fifth column of autocorr
+```{r}
+deepduration21<-list()
+for(i in 1:nrow(autocorr)){
+  dateval<-autocorr[i,1]
+  daydta <- dta %>% 
+    filter(date == dateval)
+  count=0
+  for(j in 1:nrow(daydta)){
+    if(daydta[j,]$value==1){
+      count=count+1
+    }
+  }
+  deepduration21<-append(deepduration21,count)
+}
+autocorr$daydeepduration21<-matrix(unlist(deepduration21))
+autocorr_ts<-ts(autocorr$daydeepduration21)
+plot(autocorr_ts)
+acf(autocorr_ts)
+pacf(autocorr_ts)
+```
+
+## get all the light duration for the number 21 pregnant woman and form into the sixth column of autocorr
+```{r}
+lightduration21<-list()
+for(i in 1:nrow(autocorr)){
+  dateval<-autocorr[i,1]
+  daydta <- dta %>% 
+    filter(date == dateval)
+  count=0
+  for(j in 1:nrow(daydta)){
+    if(daydta[j,]$value==2){
+      count=count+1
+    }
+  }
+  lightduration21<-append(lightduration21,count)
+}
+autocorr$daylightduration21<-matrix(unlist(lightduration21))
+autocorr_ts<-ts(autocorr$daylightduration21)
+plot(autocorr_ts)
+acf(autocorr_ts)
+pacf(autocorr_ts)
+```
+
+## get all the awake duration for the number 21 pregnant woman and form into the seventh column of autocorr
+```{r}
+awakeduration21<-list()
+for(i in 1:nrow(autocorr)){
+  dateval<-autocorr[i,1]
+  daydta <- dta %>% 
+    filter(date == dateval)
+  count=0
+  for(j in 1:nrow(daydta)){
+    if(daydta[j,]$value==4|daydta[j,]$value==5){
+      count=count+1
+    }
+  }
+  awakeduration21<-append(awakeduration21,count)
+}
+autocorr$dayawakeduration21<-matrix(unlist(awakeduration21))
+autocorr_ts<-ts(autocorr$dayawakeduration21)
+plot(autocorr_ts)
+acf(autocorr_ts)
+pacf(autocorr_ts)
+```
